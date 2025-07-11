@@ -72,13 +72,14 @@ public:
       if (ulTaskNotifyTake(pdTRUE, 0) == 0)
       {
         system_registry.task_status.setSuspend(me->_task_status_index);
-        ulTaskNotifyTake(pdTRUE, (prev_tx_enable) ? 32 : 512);
-        // ulTaskNotifyTake(pdTRUE, 2048);
+        // ulTaskNotifyTake(pdTRUE, (prev_tx_enable) ? 32 : 512);
+        ulTaskNotifyTake(pdTRUE, 2048);
         system_registry.task_status.setWorking(me->_task_status_index);
       } 
 #endif
-      bool tx_enable = midi->getUseTx();
-      bool rx_enable = midi->getUseRx();
+      bool connected = midi->isConnected();
+      bool tx_enable = connected && midi->getUseTx();
+      bool rx_enable = connected && midi->getUseRx();
       if (rx_enable) {
         if (prev_rx_enable != rx_enable) {
           prev_rx_enable = rx_enable;
@@ -153,17 +154,7 @@ public:
       bool queued = false;
       if (prev_tx_enable != tx_enable) {
         prev_tx_enable = tx_enable;
-        if (tx_enable) {
-          prev_midi_volume = 0;
-          for (int i = 0; i < 16; ++i) {
-            // チャンネルボリュームおよびプログラムチェンジを設定
-            uint8_t vol = channel_volume[i];
-            midi->sendControlChange(def::midi::channel_1 + i, 7, vol);
-            uint8_t prg = program_number[i];
-            midi->sendProgramChange(def::midi::channel_1 + i, prg);
-          }
-          queued = true;
-        }
+        prev_midi_volume = 255;
       }
       if (tx_enable) {
         if (me->_flg_instachord_link)
@@ -184,10 +175,20 @@ public:
           auto midi_volume = system_registry.user_setting.getMIDIMasterVolume();
           if (prev_midi_volume != midi_volume) {
             prev_midi_volume = midi_volume;
+            
             // マスターボリューム設定
             midi->sendControlChange(def::midi::channel_1, 99, 55);
             midi->sendControlChange(def::midi::channel_1, 98,  7);
             midi->sendControlChange(def::midi::channel_1,  6, midi_volume);
+            for (int i = 0; i < 16; ++i) {
+              // チャンネルボリュームおよびプログラムチェンジを設定
+              uint8_t vol = channel_volume[i];
+              midi->sendControlChange(def::midi::channel_1 + i, 7, vol);
+              uint8_t prg = program_number[i];
+              midi->sendProgramChange(def::midi::channel_1 + i, prg);
+  // printf("MIDI Channel %d Volume: %d, Program: %d\n", i, vol, prg);
+  // fflush(stdout);
+            }
             queued = true;
           }
         }

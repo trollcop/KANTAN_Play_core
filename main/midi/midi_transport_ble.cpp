@@ -34,7 +34,6 @@ static MIDI_Transport_BLE* _instance = nullptr;
 // peripheral BLE client
 static BLEClient* _pClient = nullptr;
 
-
 static BLEServer *pServer = nullptr;
 static BLEService *pService = nullptr;
 static BLEAdvertising *pAdvertising = nullptr;
@@ -54,12 +53,14 @@ static uint16_t _mtu_size = 23;
 class MyServerCallbacks: public BLEServerCallbacks {
   void onConnect(BLEServer *pServer, esp_ble_gatts_cb_param_t *param) override {
     _conn_id = pServer->getConnId();
+    _instance->setPeripheralConnected(true);
 // printf("BLE MIDI Connected.\n");
 // pServer->updatePeerMTU(_conn_id, _mtu_size);
     // M5.Lcd.printf("BLE MIDI Connected. MTU:%d\n", _mtu_size);
   };
   void onDisconnect(BLEServer *pServer, esp_ble_gatts_cb_param_t *param) override {
     _conn_id = -1;
+    _instance->setPeripheralConnected(false);
 // printf("BLE MIDI Disconnect.\n");
   }
   void onMtuChanged(BLEServer *pServer, esp_ble_gatts_cb_param_t *param) override {
@@ -107,8 +108,8 @@ class MyCallbacks: public BLECharacteristicCallbacks {
   void onWrite(BLECharacteristic *pCharacteristic, esp_ble_gatts_cb_param_t *param) override {
     _instance->decodeReceive(pCharacteristic->getData(), pCharacteristic->getLength());
     _instance->execTaskNotifyISR();
-    printf("onWrite called.\n");
-    fflush(stdout);
+    // printf("onWrite called.\n");
+    // fflush(stdout);
   }
   // void onRead(BLECharacteristic *pCharacteristic) override {
   //   printf("onRead called.\n");
@@ -222,16 +223,16 @@ ESP_LOGV("BLE", "sendFlush called, tx_data size: %d", _tx_data.size());
   auto remote = remotecharacteristic;
   if (remote)
   {
+    result = true;
     if (!_tx_data.empty()) {
       remote->writeValue(_tx_data.data(), _tx_data.size(), false);
     }
+  } else if (pCharacteristic && _conn_id >= 0) {
     result = true;
-  } else if (pCharacteristic) {
     if (!_tx_data.empty()) {
       pCharacteristic->setValue( _tx_data.data(), _tx_data.size());
       pCharacteristic->notify();
     }
-    result = true;
   }
   _tx_data.clear();
   _tx_runningStatus = 0;
@@ -281,13 +282,14 @@ static void notifyCallback(BLERemoteCharacteristic* pBLERemoteCharacteristic, ui
 
 class MyClientCallback : public BLEClientCallbacks {
   void onConnect(BLEClient* pclient) {
+    _instance->setCentralConnected(true);
     ESP_LOGV("BLE", "ble client: onConnect");
     // printf("ble client: onConnect\n");
   }
 
   void onDisconnect(BLEClient* pclient) {
+    _instance->setCentralConnected(false);
     // connected = false;
-    kanplay_ns::system_registry.runtime_info.setMidiPortStateBLE(kanplay_ns::def::command::midiport_info_t::mp_enabled);
     ESP_LOGV("BLE", "ble client: onDisconnect\n");
     // printf("ble client: onDisconnect\n");
     if (remotecharacteristic != nullptr) {
@@ -300,6 +302,39 @@ class MyClientCallback : public BLEClientCallbacks {
   }
 };
 static MyClientCallback myClientCallback;
+
+void MIDI_Transport_BLE::updateState(void)
+{
+  _connected = _central_connected || _peripheral_connected;
+
+  auto midiport_info = kanplay_ns::def::command::midiport_info_t::mp_off;
+  if (_connected) {
+    midiport_info = kanplay_ns::def::command::midiport_info_t::mp_connected;
+  } else if (_use_tx || _use_rx) {
+    midiport_info = kanplay_ns::def::command::midiport_info_t::mp_enabled;
+  }
+  kanplay_ns::system_registry.runtime_info.setMidiPortStateBLE(midiport_info);
+}
+
+void MIDI_Transport_BLE::setCentralConnected(bool connected)
+{
+  _central_connected = connected;
+  updateState();
+}
+
+void MIDI_Transport_BLE::setPeripheralConnected(bool connected)
+{
+  _peripheral_connected = connected;
+  updateState();
+  auto adv = pAdvertising;
+  if (adv != nullptr) {
+    if (connected) {
+      adv->stop();
+    } else {
+      adv->start();
+    }
+  }
+}
 
 void MIDI_Transport_BLE::setUseTxRx(bool use_tx, bool use_rx)
 {
@@ -314,8 +349,6 @@ void MIDI_Transport_BLE::setUseTxRx(bool use_tx, bool use_rx)
   if (prev_en != new_en) {
     _rx_data.clear();
     if (new_en) {
-      kanplay_ns::system_registry.runtime_info.setMidiPortStateBLE(kanplay_ns::def::command::midiport_info_t::mp_enabled);
-
       if (!_is_begin) {
         _is_begin = true;
         // BLEDevice::setMTU(_mtu_size);
@@ -334,98 +367,95 @@ void MIDI_Transport_BLE::setUseTxRx(bool use_tx, bool use_rx)
         if (pCharacteristic != nullptr) {
           pCharacteristic->setCallbacks(new MyCallbacks());
           pCharacteristic->addDescriptor(new BLE2902());
-  
+          pCharacteristic->setNotifyProperty(true);
+
           BLEAdvertisementData oAdvertisementData = BLEAdvertisementData();
           oAdvertisementData.setFlags(ESP_BLE_ADV_FLAG_BREDR_NOT_SPT);
           oAdvertisementData.setCompleteServices(midi_service_uuid);
           oAdvertisementData.setName(_config.device_name);
           pAdvertising = pServer->getAdvertising();
           pAdvertising->setMinPreferred(0x06); // 7.5msec  (6 x 1.25msec)
-          pAdvertising->setMaxPreferred(0x12);
+          pAdvertising->setMaxPreferred(0x0C); // 15.0msec (12 x 1.25msec)
           pAdvertising->setAdvertisementData(oAdvertisementData);
         }
       }
       pService->start();
       pAdvertising->start();
     } else {
+      if (_conn_id >= 0 && pServer != nullptr) {
+        pServer->disconnect(_conn_id);
+        _conn_id = -1;
+      }
       pAdvertising->stop();
       pService->stop();
     }
-  }
-  if (pCharacteristic != nullptr) {
-    if (use_tx) {
-      pCharacteristic->setNotifyProperty(true);
-    } else {
-      pCharacteristic->setNotifyProperty(false);
-    }
-  }
-  if (new_en) {
-    M5.delay(128); // Wait for advertising to start
-// BLEDevice::setMTU(_mtu_size);
-    auto foundMidiDevices = ble_scan();
 
-    if (!foundMidiDevices.empty()) {
-      // BLEAddress addr = foundMidiDevices[0].getAddress();
+    if (new_en) {
+      M5.delay(128); // Wait for advertising to start
+  // BLEDevice::setMTU(_mtu_size);
+      auto foundMidiDevices = ble_scan();
+  
+      if (!foundMidiDevices.empty()) {
+        // BLEAddress addr = foundMidiDevices[0].getAddress();
+        if (_pClient != nullptr) {
+          _pClient->disconnect();
+          delete _pClient;
+          _pClient = nullptr;
+        }
+        BLEClient* pClient = BLEDevice::createClient();
+  
+        pClient->setClientCallbacks(&myClientCallback);
+        pClient->connect(&foundMidiDevices[0]);
+        do {
+          M5.delay(16);
+        } while (!pClient->isConnected());
+        pClient->disconnect();
+        M5.delay(16);
+        pClient->connect(&foundMidiDevices[0]);
+        do {
+          // printf(".");
+          // fflush(stdout);
+          M5.delay(16);
+        } while (!pClient->isConnected());
+        _pClient = pClient;
+  
+        // printf("\n");
+        // fflush(stdout);
+        // bool result = pClient->setMTU(_mtu_size);
+  // printf("BLE MTU set to %d, result: %s\n", _mtu_size, result ? "success" : "failed");
+        auto remoteservice = pClient->getService(midi_service_uuid);
+  // ESP_LOGV("BLE", "remoteservice:%p", remoteservice);
+        if (remoteservice != nullptr) {
+          // remoteservice->getClient()->setMTU(_mtu_size);
+          remotecharacteristic = remoteservice->getCharacteristic(midi_characteristic_uuid);
+  /*
+  if (remotecharacteristic->canRead()            ) { printf("canRead\n"); }
+  if (remotecharacteristic->canWrite()           ) { printf("canWrite\n"); }
+  if (remotecharacteristic->canWriteNoResponse() ) { printf("canWriteNoResponse\n"); }
+  if (remotecharacteristic->canNotify()          ) { printf("canNotify\n"); }
+  if (remotecharacteristic->canIndicate()        ) { printf("canIndicate\n"); }
+  fflush(stdout);
+  //*/
+          if (remotecharacteristic != nullptr) {
+            remotecharacteristic->registerForNotify(notifyCallback);
+          }
+        } else {
+          ESP_LOGE("BLE", "Failed to find MIDI service on remote device");
+          pClient->disconnect();
+        }
+      }
+    } else {
       if (_pClient != nullptr) {
         _pClient->disconnect();
         delete _pClient;
         _pClient = nullptr;
       }
-      BLEClient* pClient = BLEDevice::createClient();
-
-      pClient->setClientCallbacks(&myClientCallback);
-/*
-while (!pClient->setMTU(mtu)) {
-  mtu = mtu / 2;
-}
-*/
-// ESP_LOGV("BLE", "try connect :%s", foundMidiDevices[0].getName().c_str());
-// pClient->setMTU(_mtu_size);
-      pClient->connect(&foundMidiDevices[0]);
-      do {
-        // printf(".");
-        // fflush(stdout);
-        M5.delay(16);
-      } while (!pClient->isConnected());
-      pClient->disconnect();
-      M5.delay(16);
-      pClient->connect(&foundMidiDevices[0]);
-      do {
-        // printf(".");
-        // fflush(stdout);
-        M5.delay(16);
-      } while (!pClient->isConnected());
-      _pClient = pClient;
-
-      // printf("\n");
-      // fflush(stdout);
-      // bool result = pClient->setMTU(_mtu_size);
-// printf("BLE MTU set to %d, result: %s\n", _mtu_size, result ? "success" : "failed");
-      auto remoteservice = pClient->getService(midi_service_uuid);
-// ESP_LOGV("BLE", "remoteservice:%p", remoteservice);
-      if (remoteservice != nullptr) {
-        // remoteservice->getClient()->setMTU(_mtu_size);
-        remotecharacteristic = remoteservice->getCharacteristic(midi_characteristic_uuid);
-/*
-if (remotecharacteristic->canRead()            ) { printf("canRead\n"); }
-if (remotecharacteristic->canWrite()           ) { printf("canWrite\n"); }
-if (remotecharacteristic->canWriteNoResponse() ) { printf("canWriteNoResponse\n"); }
-if (remotecharacteristic->canNotify()          ) { printf("canNotify\n"); }
-if (remotecharacteristic->canIndicate()        ) { printf("canIndicate\n"); }
-fflush(stdout);
-//*/
-        if (remotecharacteristic != nullptr) {
-          remotecharacteristic->registerForNotify(notifyCallback);
-          kanplay_ns::system_registry.runtime_info.setMidiPortStateBLE(kanplay_ns::def::command::midiport_info_t::mp_connected);
-        }
-      } else {
-        ESP_LOGE("BLE", "Failed to find MIDI service on remote device");
-        pClient->disconnect();
-      }
     }
   }
+
   _use_tx = use_tx;
   _use_rx = use_rx;
+  updateState();
 }
 
 //----------------------------------------------------------------

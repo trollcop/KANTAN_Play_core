@@ -104,9 +104,6 @@ static void prepare_endpoints(const void *p)
 //    MIDIOut->flags |= USB_TRANSFER_FLAG_ZERO_PACK;
   }
   isMIDIReady = ((MIDIOut != NULL) && (MIDIIn[0] != NULL));
-  if (isMIDIReady) {
-    kanplay_ns::system_registry.runtime_info.setMidiPortStateUSB(kanplay_ns::def::command::midiport_info_t::mp_connected);
-  }
 }
 
 usb_intf_desc_t midi_host_interface;
@@ -236,7 +233,6 @@ void MIDI_Transport_USB::usb_client_cb(const usb_host_client_event_msg_t *event_
     case USB_HOST_CLIENT_EVENT_DEV_GONE:
       if (Device_Handle == event_msg->dev_gone.dev_hdl) {
         isMIDIReady = false;
-        kanplay_ns::system_registry.runtime_info.setMidiPortStateUSB(kanplay_ns::def::command::midiport_info_t::mp_enabled);
         if (MIDIOut != nullptr) {
           if (MIDIOut->device_handle == event_msg->dev_gone.dev_hdl) {
             err = usb_host_transfer_free(MIDIOut);
@@ -267,6 +263,17 @@ void MIDI_Transport_USB::usb_client_cb(const usb_host_client_event_msg_t *event_
     default:
       // ESP_LOGI("", "Unknown value %d", event_msg->event);
       break;
+  }
+  if (me->_connected != isMIDIReady)
+  {
+    me->_connected = isMIDIReady;
+    auto midiport_info = kanplay_ns::def::command::midiport_info_t::mp_off;
+    if (isMIDIReady) {
+      midiport_info = kanplay_ns::def::command::midiport_info_t::mp_connected;
+    } else if (me->_use_tx || me->_use_rx) {
+      midiport_info = kanplay_ns::def::command::midiport_info_t::mp_enabled;
+    }
+    kanplay_ns::system_registry.runtime_info.setMidiPortStateUSB(midiport_info);
   }
 }
 
