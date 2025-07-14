@@ -343,10 +343,25 @@ void task_kantanplay_t::procChordDegree(const def::command::command_param_t& com
 void task_kantanplay_t::procChordBeat(const def::command::command_param_t& command_param, const bool is_pressed)
 {
   // is_pressed==trueをオンビート、 falseをオフビート扱いとする
-  auto on_beat = is_pressed;
+  const auto on_beat = is_pressed;
 
 // この関数が呼ばれるのはユーザーによるDegreeボタン操作時や外部からのパルスがトリガー。
 // 自動演奏によるトリガーは含まれない。
+
+  bool offbeat_auto = (system_registry.user_setting.getOffbeatStyle() == def::play::offbeat_style_t::offbeat_auto);
+
+  if (!offbeat_auto) {
+    auto iclink_port = system_registry.midi_port_setting.getInstaChordLinkPort();
+    auto iclink_style = system_registry.midi_port_setting.getInstaChordLinkStyle();
+    // インスタコードリンクのパッド演奏時はウラ拍自動演奏として扱う
+    offbeat_auto = (iclink_port != def::command::instachord_link_port_t::iclp_off)
+                && (iclink_style == def::command::instachord_link_style_t::icls_pad);
+  }
+
+  // オフビートかつウラ拍自動の場合、オフビートコマンドに対する処理は行わず終了する
+  if (!on_beat && offbeat_auto) {
+    return;
+  }
 
   // 次回の自動演奏タイミングをキャンセルしておく
   _auto_play_onbeat_remain_usec = -1;
@@ -354,36 +369,18 @@ void task_kantanplay_t::procChordBeat(const def::command::command_param_t& comma
 
   chordBeat(on_beat);
 
-  auto autoplay_state = system_registry.runtime_info.getChordAutoplayState();
-  const auto offbeat_style = system_registry.user_setting.getOffbeatStyle();
-
-  // if (autoplay_state == def::play::auto_play_mode_t::auto_play_running) {
-  //   autoplay_state = def::play::auto_play_mode_t::auto_play_running;
-  //   system_registry.runtime_info.setChordAutoplayState(autoplay_state);
-  // }
-
   if (on_beat) {
     // 自動演奏のサイクルを更新する
     setOnbeatCycle(_current_usec - _reactive_onbeat_usec);
     _reactive_onbeat_usec = _current_usec;
 
-    // インスタコードリンクのパッド演奏時
-    auto iclink_port = system_registry.midi_port_setting.getInstaChordLinkPort();
-    auto iclink_style = system_registry.midi_port_setting.getInstaChordLinkStyle();
-    bool iclink_pad_mode
-      = ((iclink_port != def::command::instachord_link_port_t::iclp_off)
-      && (iclink_style == def::command::instachord_link_style_t::icls_pad)
-      );
-
-    if ((autoplay_state != def::play::auto_play_mode_t::auto_play_none)
-     || (offbeat_style != def::play::offbeat_style_t::offbeat_self)
-     || iclink_pad_mode) {
+    // オフビートがオートの場合は、ここでオフビートのタイミングを更新する
+    if (offbeat_auto) {
       updateOffbeatTiming();
     }
   } else {
-    // ウラ拍の演奏が手動の場合
-    if ((autoplay_state == def::play::auto_play_mode_t::auto_play_none)
-     && (offbeat_style == def::play::offbeat_style_t::offbeat_self)) {
+    // オフビートがオートでない場合
+    if (!offbeat_auto) {
       // 手動だが step per beat が 3以上の場合は、後続のウラ拍を自動演奏にする
       const uint_fast8_t step_per_beat = system_registry.current_slot->slot_info.getStepPerBeat();
       if (step_per_beat >= 3) {

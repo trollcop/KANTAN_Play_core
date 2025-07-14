@@ -2952,6 +2952,8 @@ struct ui_filename_t : public ui_base_t
 };
 ui_filename_t ui_filename;
 
+static void update_header_container_width(void);
+
 struct ui_left_icon_container_t : public ui_container_t
 {
 protected:
@@ -2971,6 +2973,7 @@ protected:
         w += 2;
       }
     }
+    update_header_container_width();
     ui_base_t::update_impl(param, offset_x, offset_y);
   }
 };
@@ -2979,26 +2982,50 @@ ui_left_icon_container_t ui_left_icon_container;
 struct ui_right_icon_container_t : public ui_container_t
 {
   void update_impl(draw_param_t *param, int offset_x, int offset_y) override {
-    int w = 0;
+    int32_t w = 0;
     for (auto ui : _ui_child) {
       ui->update(param, offset_x, offset_y);
       auto tr = ui->getTargetRect();
-      w += tr.w;
-      int x = _target_rect.w - w;
+      tr.x = w;
       if (tr.w) {
         w += 2;
       }
-      if (tr.x != x) {
-        param->addInvalidatedRect({offset_x + tr.x, offset_y, tr.w, tr.h});
-        param->addInvalidatedRect({offset_x +    x, offset_y, tr.w, tr.h});
-        tr.x = x;
-        ui->setTargetRect(tr);
+      w += tr.w;
+      ui->setTargetRect(tr);
+    }
+    _target_rect.w = w;
+    int32_t new_x = disp_width - w;
+    int32_t diff = _target_rect.x - new_x;
+    _target_rect.x = new_x;
+    _client_rect = _target_rect;
+
+    w = 0;
+    if (diff) {
+      for (auto ui : _ui_child) {
+        auto tr = ui->getClientRect();
+        tr.x += diff;
+        // param->addInvalidatedRect({offset_x + tr.x, offset_y, tr.w, tr.h});
+        // param->addInvalidatedRect({offset_x +    x, offset_y, tr.w, tr.h});
+        ui->setClientRect(tr);
       }
     }
+    update_header_container_width();
     ui_base_t::update_impl(param, offset_x, offset_y);
   }
 };
 ui_right_icon_container_t ui_right_icon_container;
+
+static void update_header_container_width(void)
+{
+  auto left = ui_left_icon_container.getTargetRect();
+  auto right = ui_right_icon_container.getTargetRect();
+  int32_t w = right.x - left.x - 1;
+  if (w < 0) { w = 0; }
+  if (left.w != w) {
+    left.w = w;
+    ui_left_icon_container.setTargetRect(left);
+  }
+}
 
 struct ui_raw_wave_t : public ui_base_t
 {
@@ -3183,10 +3210,10 @@ void gui_t::init(void)
   ui_wifi_sta_info.setClientRect(r);
   ui_wifi_ap_info.setTargetRect(r);
   ui_wifi_ap_info.setClientRect(r);
-  ui_midiport_info.setTargetRect(r);
-  ui_midiport_info.setClientRect(r);
   ui_icon_sequance_play.setTargetRect(r);
   ui_icon_sequance_play.setClientRect(r);
+  ui_midiport_info.setTargetRect(r);
+  ui_midiport_info.setClientRect(r);
 
   r.x = 0;
   ui_playkey_info.setClientRect(r);
@@ -3227,12 +3254,12 @@ void gui_t::init(void)
   ui_left_icon_container.addChild(&ui_song_modified);
   ui_left_icon_container.addChild(&ui_filename);
 
-  ui_right_icon_container.addChild(&ui_volume_info);
-  ui_right_icon_container.addChild(&ui_battery_info);
-  ui_right_icon_container.addChild(&ui_wifi_sta_info);
-  ui_right_icon_container.addChild(&ui_wifi_ap_info);
-  ui_right_icon_container.addChild(&ui_midiport_info);
   ui_right_icon_container.addChild(&ui_icon_sequance_play);  
+  ui_right_icon_container.addChild(&ui_midiport_info);
+  ui_right_icon_container.addChild(&ui_wifi_ap_info);
+  ui_right_icon_container.addChild(&ui_wifi_sta_info);
+  ui_right_icon_container.addChild(&ui_battery_info);
+  ui_right_icon_container.addChild(&ui_volume_info);
 //*/
   ui_background.addChild(&ui_chord_part_container);
   ui_background.addChild(&ui_main_buttons);
