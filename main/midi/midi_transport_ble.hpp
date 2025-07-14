@@ -44,6 +44,7 @@ private:
 
   bool _central_connected = false;
   bool _peripheral_connected = false;
+  bool _connecting = false;
   void updateState(void);
 };
 

@@ -438,9 +438,9 @@ void task_midi_t::task_func(task_midi_t* me)
     if (prev_ble_out != ble_out || prev_ble_in != ble_in) {
       bool prev_en = prev_ble_out || prev_ble_in;
       bool en = ble_out || ble_in;
-      if (prev_en != en) {
-        kanplay_ns::system_registry.runtime_info.setMidiPortStateBLE(en ? kanplay_ns::def::command::midiport_info_t::mp_enabled : kanplay_ns::def::command::midiport_info_t::mp_off);
-      }
+      // if (prev_en != en) {
+      //   kanplay_ns::system_registry.runtime_info.setMidiPortStateBLE(en ? kanplay_ns::def::command::midiport_info_t::mp_enabled : kanplay_ns::def::command::midiport_info_t::mp_off);
+      // }
       prev_ble_out = ble_out;
       prev_ble_in  = ble_in;
       ble_midi_transport.setUseTxRx(ble_out, ble_in);
@@ -458,9 +458,9 @@ void task_midi_t::task_func(task_midi_t* me)
     if (prev_usb_out != usb_out || prev_usb_in != usb_in) {
       bool prev_en = prev_usb_out || prev_usb_in;
       bool en = usb_out || usb_in;
-      if (prev_en != en) {
-        kanplay_ns::system_registry.runtime_info.setMidiPortStateUSB(en ? kanplay_ns::def::command::midiport_info_t::mp_enabled : kanplay_ns::def::command::midiport_info_t::mp_off);
-      }
+      // if (prev_en != en) {
+      //   kanplay_ns::system_registry.runtime_info.setMidiPortStateUSB(en ? kanplay_ns::def::command::midiport_info_t::mp_enabled : kanplay_ns::def::command::midiport_info_t::mp_off);
+      // }
       prev_usb_out = usb_out;
       prev_usb_in  = usb_in;
       usb_midi_transport.setUseTxRx(usb_out, usb_in);

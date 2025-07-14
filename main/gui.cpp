@@ -811,36 +811,50 @@ protected:
       , __builtin_bswap32(0b00111110001111110001111110000000)
       },
     };
-    def::command::midiport_info_t _ports[3] = { def::command::midiport_info_t::mp_off };
+    uint32_t _color[3] = { 0, 0, 0 };
     uint8_t _tx_couunt[3] = { 0, 0, 0 };
     uint8_t _rx_couunt[3] = { 0, 0, 0 };
-    uint16_t _tx_image[3];
-    uint16_t _rx_image[3];
+    uint16_t _tx_dots[3];
+    uint16_t _rx_dots[3];
     bool _visible = false;
 
 public:
   void update_impl(draw_param_t *param, int offset_x, int offset_y) override {
     ui_base_t::update_impl(param, offset_x, offset_y);
     bool updated = false;
-    auto p0 = system_registry.runtime_info.getMidiPortStatePC();
-    auto p1 = system_registry.runtime_info.getMidiPortStateBLE();
-    auto p2 = system_registry.runtime_info.getMidiPortStateUSB();
-    if (_ports[0] != p0 || _ports[1] != p1 || _ports[2] != p2) {
-      updated = true;
-      _ports[0] = p0;
-      _ports[1] = p1;
-      _ports[2] = p2;
-      bool visible = p0 != def::command::midiport_info_t::mp_off
-                  || p1 != def::command::midiport_info_t::mp_off
-                  || p2 != def::command::midiport_info_t::mp_off;
-      if (_visible != visible) {
-        _visible = visible;
-        int w = (visible)
-              ? 26 : 0;
-        if (w != _target_rect.w) {
-          _target_rect.x -= w - _target_rect.w;
-          _target_rect.w = w;
+
+    def::command::midiport_info_t info[3];
+    info[0] = system_registry.runtime_info.getMidiPortStatePC();
+    info[1] = system_registry.runtime_info.getMidiPortStateBLE();
+    info[2] = system_registry.runtime_info.getMidiPortStateUSB();
+
+    bool visible = false;
+    for (int i = 0; i < 3; ++i) {
+      uint32_t color = 0x303030u;
+      if (info[i] != def::command::midiport_info_t::mp_off) {
+        visible = true;
+        switch (info[i]) {
+        case def::command::midiport_info_t::mp_enabled:
+          color = 0x606060u; break;
+        case def::command::midiport_info_t::mp_connected:
+          color = 0xFFFFFFu; break;
+        case def::command::midiport_info_t::mp_connecting:
+          color = ((param->current_msec >> 8)&1) ? 0xFFFFFFu : 0x606060u; break;
+        default: break;
         }
+      }
+      if (_color[i] != color) {
+        _color[i] = color;
+        updated = true;
+      }
+    }
+    if (_visible != visible) {
+      _visible = visible;
+      int w = (visible)
+            ? 26 : 0;
+      if (w != _target_rect.w) {
+        _target_rect.x -= w - _target_rect.w;
+        _target_rect.w = w;
       }
     }
     uint8_t tx_couunt[3] = {
@@ -855,17 +869,17 @@ public:
     };
 
     // 通信カウンタのドット移動増分を求める
-    uint8_t shift = (param->current_msec >> 3) - (param->prev_msec >> 3);
+    uint8_t shift = (param->current_msec >> 4) - (param->prev_msec >> 4);
     if (shift) {
       for (int i = 0; i < 3; ++i) {
-        auto tx = _tx_image[i];
+        auto tx = _tx_dots[i];
         if (tx) {
-          _tx_image[i] = tx << shift;
+          _tx_dots[i] = tx << shift;
           updated = true;
         }
-        auto rx = _rx_image[i];
+        auto rx = _rx_dots[i];
         if (rx) {
-          _rx_image[i] = rx << shift;
+          _rx_dots[i] = rx << shift;
           updated = true;
         }
       }
@@ -873,12 +887,12 @@ public:
     for (int i = 0; i < 3; ++i) {
       if (_tx_couunt[i] != tx_couunt[i]) {
         _tx_couunt[i] = tx_couunt[i];
-        _tx_image[i] |= 1;
+        _tx_dots[i] |= 1;
         updated = true;
       }
       if (_rx_couunt[i] != rx_couunt[i]) {
         _rx_couunt[i] = rx_couunt[i];
-        _rx_image[i] |= 1;
+        _rx_dots[i] |= 1;
         updated = true;
       }
     }
@@ -894,22 +908,14 @@ public:
     int w = _client_rect.w;
     for (int i = 0; i < 3; ++i) {
       int y = offset_y + (i * 8);
-      uint32_t color = 0x303030u;
-      switch (_ports[i]) {
-      case def::command::midiport_info_t::mp_enabled:
-        color = 0x606060u; break;
-      case def::command::midiport_info_t::mp_connected:
-        color = 0xFFFFFFu; break;
-      default: break;
-      }
-      canvas->drawBitmap(x, y+2, (const uint8_t*)images[i], 32, 5, color);
+      canvas->drawBitmap(x, y+2, (const uint8_t*)images[i], 32, 5, _color[i]);
       canvas->setColor(0xFFFF00u);
       for (int j = 0; j < 13; ++j) {
-        if (_tx_image[i] & (1 << j)) {
+        if (_tx_dots[i] & (1 << j)) {
           canvas->writePixel(x +     (12 - j), y);
           canvas->writePixel(x +w-1- (12 - j), y);
         }
-        if (_rx_image[i] & (1 << j)) {
+        if (_rx_dots[i] & (1 << j)) {
           canvas->writePixel(x +     j, y + 1);
           canvas->writePixel(x +w-1- j, y + 1);
         }
@@ -922,12 +928,12 @@ static ui_midiport_info_t ui_midiport_info;
 struct ui_icon_sequance_play_t : public ui_base_t
 {
 protected:
-  def::play::auto_play_mode_t _mode;
+  def::play::auto_play_mode_t _autoplay_style;
 public:
   void update_impl(draw_param_t *param, int offset_x, int offset_y) override {
     auto mode = system_registry.runtime_info.getChordAutoplayState();
-    if (_mode != mode) {
-      _mode = mode;
+    if (_autoplay_style != mode) {
+      _autoplay_style = mode;
       if (mode == def::play::auto_play_mode_t::auto_play_none) {
         _target_rect.w = 0;
       } else {
@@ -949,8 +955,19 @@ public:
 
     x = x + (w >> 1);
     y = y + (h >> 1);
-    if (_mode != def::play::auto_play_mode_t::auto_play_none) {
+    switch (_autoplay_style) {
+    default:
       canvas->fillTriangle(x - 5, y - 5, x - 5, y + 5, x + 5, y, TFT_GREEN);
+      break;
+    case def::play::auto_play_mode_t::auto_play_none:
+      break;
+    case def::play::auto_play_mode_t::auto_play_beatmode:
+      canvas->drawFastHLine(x - 4, y,  2, TFT_YELLOW);
+      canvas->drawFastHLine(x + 3, y,  2, TFT_YELLOW);
+      canvas->drawLine(x - 3, y    , x - 1, y - 6, TFT_YELLOW);
+      canvas->drawLine(x - 1, y - 5, x + 1, y + 6, TFT_YELLOW);
+      canvas->drawLine(x + 3, y    , x + 1, y + 6, TFT_YELLOW);
+      break;
     }
   }
 };

@@ -392,6 +392,7 @@ Button Index mapping
     enum class midiport_info_t : uint8_t {
       mp_off = 0,
       mp_enabled,
+      mp_connecting,
       mp_connected,
     };
 
@@ -786,6 +787,7 @@ Button Index mapping
       auto_play_none,
       auto_play_waiting,
       auto_play_running,
+      auto_play_beatmode,
       auto_play_max,
     };
 

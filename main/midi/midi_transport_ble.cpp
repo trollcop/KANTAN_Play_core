@@ -117,7 +117,16 @@ class MyCallbacks: public BLECharacteristicCallbacks {
   // void onNotify(BLECharacteristic *pCharacteristic) override {
   //   printf("onNotify called.\n");
   // }
-
+  // void onStatus(BLECharacteristic *pCharacteristic, Status s, uint32_t code) override {
+  //   if (s == SUCCESS_NOTIFY || s == SUCCESS_INDICATE) {
+  //     // ESP_LOGV("BLE", "onStatus: success");
+  //     printf("onStatus: success\n");
+  //   } else {
+  //     // ESP_LOGE("BLE", "onStatus: error %d, code %d", s, code);
+  //     printf("onStatus: error %d, code %d", s, code);
+  //   }
+  //   fflush(stdout);
+  // }
 };
 
 static std::vector<BLEAdvertisedDevice> ble_scan(void)
@@ -269,36 +278,39 @@ size_t MIDI_Transport_BLE::read(uint8_t* data, size_t length)
 //*/
 
 static void notifyCallback(BLERemoteCharacteristic* pBLERemoteCharacteristic, uint8_t* pData, size_t length, bool isNotify) {
-  _instance->decodeReceive(pData, length);
-  _instance->execTaskNotifyISR();
-  // printf("Notify callback for characteristic ");
+  // printf("Notify callback for characteristic %d ", isNotify ? 1 : 0);
   // printf(pBLERemoteCharacteristic->getUUID().toString().c_str());
   // printf(" of data length : %d  data:", length);
   // for (int i = 0; i < length; i++) {
   //   printf("%02x ", pData[i]);
   // }
   // printf("\n");
+  // fflush(stdout);
+  if (_instance != nullptr && length && isNotify) {
+    _instance->decodeReceive(pData, length);
+    _instance->execTaskNotifyISR();
+  }
 }
 
 class MyClientCallback : public BLEClientCallbacks {
   void onConnect(BLEClient* pclient) {
-    _instance->setCentralConnected(true);
     ESP_LOGV("BLE", "ble client: onConnect");
     // printf("ble client: onConnect\n");
+    // fflush(stdout);
+    // _instance->setCentralConnected(true);
   }
 
   void onDisconnect(BLEClient* pclient) {
-    _instance->setCentralConnected(false);
     // connected = false;
     ESP_LOGV("BLE", "ble client: onDisconnect\n");
     // printf("ble client: onDisconnect\n");
-    if (remotecharacteristic != nullptr) {
-      remotecharacteristic = nullptr;
-    }
+    // fflush(stdout);
+    remotecharacteristic = nullptr;
     if (pclient == _pClient) {
       _pClient = nullptr;
       delete pclient;
     }
+    _instance->setCentralConnected(false);
   }
 };
 static MyClientCallback myClientCallback;
@@ -308,7 +320,10 @@ void MIDI_Transport_BLE::updateState(void)
   _connected = _central_connected || _peripheral_connected;
 
   auto midiport_info = kanplay_ns::def::command::midiport_info_t::mp_off;
-  if (_connected) {
+
+  if (_connecting) {
+    midiport_info = kanplay_ns::def::command::midiport_info_t::mp_connecting;
+  } else if (_connected) {
     midiport_info = kanplay_ns::def::command::midiport_info_t::mp_connected;
   } else if (_use_tx || _use_rx) {
     midiport_info = kanplay_ns::def::command::midiport_info_t::mp_enabled;
@@ -390,69 +405,87 @@ void MIDI_Transport_BLE::setUseTxRx(bool use_tx, bool use_rx)
       pService->stop();
     }
 
+    _instance->setCentralConnected(false);
+    if (_pClient != nullptr) {
+      remotecharacteristic = nullptr;
+      _pClient->disconnect();
+      // delete _pClient;
+      // _pClient = nullptr;
+    }
+
     if (new_en) {
-      M5.delay(128); // Wait for advertising to start
+      // M5.delay(128); // Wait for advertising to start
   // BLEDevice::setMTU(_mtu_size);
       auto foundMidiDevices = ble_scan();
-  
       if (!foundMidiDevices.empty()) {
         // BLEAddress addr = foundMidiDevices[0].getAddress();
-        if (_pClient != nullptr) {
-          _pClient->disconnect();
-          delete _pClient;
-          _pClient = nullptr;
-        }
+        _connecting = true;
         BLEClient* pClient = BLEDevice::createClient();
-  
-        pClient->setClientCallbacks(&myClientCallback);
-        pClient->connect(&foundMidiDevices[0]);
-        do {
-          M5.delay(16);
-        } while (!pClient->isConnected());
-        pClient->disconnect();
-        M5.delay(16);
-        pClient->connect(&foundMidiDevices[0]);
-        do {
-          // printf(".");
-          // fflush(stdout);
-          M5.delay(16);
-        } while (!pClient->isConnected());
-        _pClient = pClient;
-  
-        // printf("\n");
-        // fflush(stdout);
-        // bool result = pClient->setMTU(_mtu_size);
-  // printf("BLE MTU set to %d, result: %s\n", _mtu_size, result ? "success" : "failed");
-        auto remoteservice = pClient->getService(midi_service_uuid);
-  // ESP_LOGV("BLE", "remoteservice:%p", remoteservice);
-        if (remoteservice != nullptr) {
-          // remoteservice->getClient()->setMTU(_mtu_size);
-          remotecharacteristic = remoteservice->getCharacteristic(midi_characteristic_uuid);
-  /*
-  if (remotecharacteristic->canRead()            ) { printf("canRead\n"); }
-  if (remotecharacteristic->canWrite()           ) { printf("canWrite\n"); }
-  if (remotecharacteristic->canWriteNoResponse() ) { printf("canWriteNoResponse\n"); }
-  if (remotecharacteristic->canNotify()          ) { printf("canNotify\n"); }
-  if (remotecharacteristic->canIndicate()        ) { printf("canIndicate\n"); }
-  fflush(stdout);
-  //*/
-          if (remotecharacteristic != nullptr) {
-            remotecharacteristic->registerForNotify(notifyCallback);
+        if (pClient != nullptr) {
+          pClient->setClientCallbacks(&myClientCallback);
+          // pClient->connect(&foundMidiDevices[0]);
+          // do {
+          //   M5.delay(1);
+          // } while (!pClient->isConnected());
+          // pClient->disconnect();
+          // M5.delay(16);
+          int retry = 3;
+          do {
+            // printf("connect:%s\n", foundMidiDevices[0].getName().c_str());
+            // fflush(stdout);
+            pClient->connect(&foundMidiDevices[0]);
+            do {
+              // printf(".");
+              // fflush(stdout);
+              M5.delay(1);
+            } while (!pClient->isConnected());
+
+            // printf("\n");
+            // fflush(stdout);
+            // bool result = pClient->setMTU(_mtu_size);
+      // printf("BLE MTU set to %d, result: %s\n", _mtu_size, result ? "success" : "failed");
+            M5.delay(16);
+            // printf("getService:\n");
+            // fflush(stdout);
+            auto remoteservice = pClient->getService(midi_service_uuid);
+      // ESP_LOGV("BLE", "remoteservice:%p", remoteservice);
+            if (remoteservice != nullptr) {
+              // remoteservice->getClient()->setMTU(_mtu_size);
+              // printf("getCharacteristic:\n");
+              // fflush(stdout);
+              M5.delay(16);
+              auto rc = remoteservice->getCharacteristic(midi_characteristic_uuid);
+              // remotecharacteristic = remoteservice->getCharacteristic(midi_characteristic_uuid);
+              if (rc != nullptr) {
+                /*
+                  if (rc->canRead()            ) { printf("canRead\n"); }
+                  if (rc->canWrite()           ) { printf("canWrite\n"); }
+                  if (rc->canWriteNoResponse() ) { printf("canWriteNoResponse\n"); }
+                  if (rc->canNotify()          ) { printf("canNotify\n"); }
+                  if (rc->canIndicate()        ) { printf("canIndicate\n"); }
+                  fflush(stdout);
+                  //*/
+                rc->registerForNotify(notifyCallback);
+                remotecharacteristic = rc;
+                _pClient = pClient;
+                _instance->setCentralConnected(true);
+                break;
+              }
+            }
+            // printf("Failed to find MIDI service on remote device:retry:%d\n", retry);
+            // fflush(stdout);
+            pClient->disconnect();
+          } while (--retry);
+          if (pClient != nullptr && _pClient != pClient) {
+            ESP_LOGE("BLE", "Failed to find MIDI service on remote device");
+            delete pClient;
+            pClient = nullptr;
           }
-        } else {
-          ESP_LOGE("BLE", "Failed to find MIDI service on remote device");
-          pClient->disconnect();
         }
-      }
-    } else {
-      if (_pClient != nullptr) {
-        _pClient->disconnect();
-        delete _pClient;
-        _pClient = nullptr;
       }
     }
   }
-
+  _connecting = false;
   _use_tx = use_tx;
   _use_rx = use_rx;
   updateState();
