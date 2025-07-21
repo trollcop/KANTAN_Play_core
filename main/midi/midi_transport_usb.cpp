@@ -144,7 +144,7 @@ static void proc_config_desc(const usb_config_desc_t *config_desc)
         case USB_B_DESCRIPTOR_TYPE_ENDPOINT:
           if (isMIDI && !isMIDIReady) {
             auto endpoint = reinterpret_cast<const usb_ep_desc_t*>(p);
-            prepare_endpoints(p);
+            prepare_endpoints(endpoint);
           }
           break;
 
@@ -378,7 +378,9 @@ void MIDI_Transport_USB::setUseTxRx(bool tx_enable, bool rx_enable)
 
   const usb_host_config_t config = {
     .skip_phy_setup = false,
+    .root_port_unpowered = false,
     .intr_flags = ESP_INTR_FLAG_LEVEL1,
+    .enum_filter_cb = nullptr,
   };
   esp_err_t err = usb_host_install(&config);
   // ESP_LOGI("", "usb_host_install: %x", err);
