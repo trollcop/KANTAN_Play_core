@@ -30,10 +30,10 @@ static uint32_t getColorByCommand(const def::command::command_param_t &command_p
   case def::command::chord_modifier:
     color = system_registry.color_setting.getButtonModifierColor();
     break;
-  case def::command::autoplay_switch:
   case def::command::chord_minor_swap:
     color = system_registry.color_setting.getButtonMinorSwapColor();
     break;
+  case def::command::autoplay_switch:
   case def::command::chord_semitone:
     color = system_registry.color_setting.getButtonSemitoneColor();
     break;
@@ -46,7 +46,7 @@ static uint32_t getColorByCommand(const def::command::command_param_t &command_p
   case def::command::part_on:
   case def::command::part_off:
     color = system_registry.color_setting.getButtonPartColor();
-    if (!system_registry.chord_play.getPartNextEnable(command_param.getParam() - 1)) {
+    if (!system_registry.current_slot->chord_part[command_param.getParam() - 1].part_info.getEnabled()) {
       color = (color >> 1) & 0x7F7F7F;
     }
     break;
@@ -54,8 +54,20 @@ static uint32_t getColorByCommand(const def::command::command_param_t &command_p
     color = system_registry.color_setting.getArpeggioNoteBackColor();
     break;
   case def::command::menu_function:
-    color = system_registry.color_setting.getButtonMenuNumberColor();
+    switch (command_param.getParam()) {
+    case def::command::menu_function_t::mf_back:
+    case def::command::menu_function_t::mf_exit:
+      color = system_registry.color_setting.getButtonDrumColor();
+      break;
+    case def::command::menu_function_t::mf_enter:
+      color = system_registry.color_setting.getButtonNoteColor();
+      break;
+    default:
+      color = system_registry.color_setting.getButtonMenuNumberColor();
+      break;
+    }
     break;
+
   case def::command::slot_select:
     {
       auto play_mode = system_registry.song_data.slot[command_param.getParam() - 1].slot_info.getPlayMode();
@@ -96,6 +108,38 @@ static uint32_t getColorByCommand(const def::command::command_param_t &command_p
 
   case def::command::edit_function:
     color = system_registry.color_setting.getButtonCursorColor();
+    switch (command_param.getParam()) {
+    case def::command::edit_function_t::copy:
+    case def::command::edit_function_t::paste:
+      color = system_registry.color_setting.getButtonSemitoneColor();
+      break;
+
+    case def::command::edit_function_t::ef_mute:
+      color = system_registry.color_setting.getButtonDefaultColor();
+      break;
+
+    case def::command::edit_function_t::ef_on:
+      color = 0xFF8800u; // オレンジ色
+      break;
+
+    case def::command::edit_function_t::ef_off:
+      color = 0x7F4400u; // 暗いオレンジ色
+      break;
+
+    default:
+      color = system_registry.color_setting.getButtonMenuNumberColor();
+      break;
+    }
+    break;
+  case def::command::edit_exit:
+    switch (command_param.getParam()) {
+    default:
+      color = system_registry.color_setting.getButtonDrumColor();
+      break;
+    case def::command::edit_exit_t::save:
+      color = system_registry.color_setting.getButtonNoteColor();
+      break;
+    }
     break;
 
   case def::command::edit_enc2_target:
@@ -259,6 +303,7 @@ void task_operator_t::commandProccessor(const def::command::command_param_t& com
     }
     break;
 
+  case def::command::slot_select_ud:
   case def::command::slot_select:  // スロット選択操作に関してはスロット変更関数の中で処理する。
     break;
 
@@ -290,13 +335,16 @@ void task_operator_t::commandProccessor(const def::command::command_param_t& com
 // M5_LOGV("command:%d value:%d", command, cmd_value);
   switch (command) {
   default: break;
+  case def::command::chord_beat:
+    system_registry.runtime_info.setChordAutoplayState(def::play::auto_play_mode_t::auto_play_beatmode);
+    [[fallthrough]]; // chord_beatは外部ビートでの演奏の開始と併せて以下の処理も実行する
   case def::command::set_velocity:
   case def::command::chord_degree:
   case def::command::note_button:
   case def::command::drum_button:
-  case def::command::chord_beat:
   case def::command::chord_step_reset_request:
   case def::command::autoplay_switch:
+  case def::command::panic_stop:
     system_registry.player_command.addQueue(command_param, is_pressed);
     break;
 
@@ -330,11 +378,32 @@ void task_operator_t::commandProccessor(const def::command::command_param_t& com
       if (system_registry.runtime_info.getPlayMode() != def::playmode::playmode_t::chord_edit_mode) {
         uint8_t slot_index = param - 1;
         setSlotIndex(slot_index);
-  
         changeCommandMapping();
       }
     }
     break;
+
+  case def::command::slot_select_ud:
+// スロット選択ボタンの上下操作 , 現在のスロット番号から相対的に移動する
+// InstaChord側からのスロット選択は、スロット番号を相対移動で行う。
+    if (is_pressed) {
+      // パターン編集モードの場合、スロット切替を許可しない
+      if (system_registry.runtime_info.getPlayMode() != def::playmode::playmode_t::chord_edit_mode) {
+        auto slot_index = (int)system_registry.runtime_info.getPlaySlot();
+        slot_index += param;  // paramは-1,1のいずれか
+        // スロット番号を範囲内に収まるようループさせる
+        while (slot_index < 0) {
+          slot_index += def::app::max_slot;
+        }
+        while (slot_index >= def::app::max_slot) {
+          slot_index -= def::app::max_slot;
+        }
+        setSlotIndex(slot_index);
+        changeCommandMapping();
+      }
+    }
+    break;
+
 
   case def::command::mapping_switch:
     if (is_pressed) {
@@ -398,6 +467,20 @@ void task_operator_t::commandProccessor(const def::command::command_param_t& com
     if (is_pressed) {
       M5_LOGV("master key %d", param);
       system_registry.runtime_info.setMasterKey(param);
+    }
+    break;
+
+  case def::command::target_key_set:
+    if (is_pressed) {
+      // InstaChord側から目的のキーを設定するためのコマンド
+      // ここでは、InstaChord側からのキー設定を受け取って、スロットの相対キーを相殺した値をマスターキーに設定する。
+      // これにより、InstaChord側から設定されたキーが実際の演奏キーになる。
+      M5_LOGV("target key %d", param);
+      int slot_key = (int8_t)system_registry.current_slot->slot_info.getKeyOffset();
+      int master_key = param - slot_key;
+      while (master_key < 0) { master_key += 12; }
+      while (master_key >= 12) { master_key -= 12; }
+      system_registry.runtime_info.setMasterKey(master_key);
     }
     break;
 
@@ -467,7 +550,8 @@ void task_operator_t::commandProccessor(const def::command::command_param_t& com
     if (is_pressed) {
       uint8_t part_index = param - 1;
       // パートオンまたは編集の場合は当該パートを有効化する
-      system_registry.chord_play.setPartNextEnable(part_index, def::command::part_off != command);
+      bool en = def::command::part_off != command;
+      system_registry.current_slot->chord_part[part_index].part_info.setEnabled(en);
       if (def::command::part_edit == command)
       { // 編集に入る前にバックアップする
         system_registry.backup_song_data.assign(system_registry.song_data);
@@ -673,17 +757,15 @@ void task_operator_t::commandProccessor(const def::command::command_param_t& com
         menu_control.enter();
         break;
 
-      case def::command::mf_exit: // 親階層に戻る
+      case def::command::mf_back: // 親階層に戻る
         if (!menu_control.exit()) {
-          // 最上位メニューから抜け時の処理
-
-          // メニューから抜ける時はオートプレイは無効にする
-          system_registry.runtime_info.setChordAutoplayState(def::play::auto_play_mode_t::auto_play_none);
-
-          system_registry.runtime_info.setMenuVisible( false );
-          changeCommandMapping();
-          system_registry.save();
+          afterMenuClose();
         }
+        break;
+
+      case def::command::mf_exit: // メニューをすべて閉じる
+        while (menu_control.exit()) { M5.delay(1); };
+        afterMenuClose();
         break;
 
       default: // mf_0 ～ mf_9
@@ -698,13 +780,17 @@ void task_operator_t::commandProccessor(const def::command::command_param_t& com
       system_registry.checkSongModified();
     }
     break;
-
-  case def::command::panic_stop:
-    if (is_pressed) {
-      system_registry.midi_out_control.setControlChange(120, 0);
-    }
-    break;
   }
+}
+
+// 最上位メニューから抜けた時の処理
+void task_operator_t::afterMenuClose(void)
+{ // メニューから抜ける時はオートプレイは無効にする
+  system_registry.runtime_info.setChordAutoplayState(def::play::auto_play_mode_t::auto_play_none);
+
+  system_registry.runtime_info.setMenuVisible( false );
+  changeCommandMapping();
+  system_registry.save();
 }
 
 void task_operator_t::procEditFunction(const def::command::command_param_t& command_param)
@@ -838,7 +924,7 @@ void task_operator_t::procEditFunction(const def::command::command_param_t& comm
     break;
   }
 
-  // 異動した場合はプレビュー音の再生などを行う
+  // 移動した場合はプレビュー音の再生などを行う
   if (cursor_x != new_x || cursor_y != new_y) {
     if (cursor_y != new_y) {
       if (new_y < 0) { new_y = 0; }

@@ -46,21 +46,26 @@ static int getDataByteLength(uint8_t status) {
 
 void MIDIDriver::sendMessage(uint8_t status_byte, uint8_t data1, uint8_t data2)
 {
-  if (_send_data.size() >= _send_buffer_size - 3) {
-    sendFlush();
-  }
-  if (_send_runningStatus != status_byte) {
-    _send_runningStatus = status_byte;
-    sendFlush();
-    _send_data.push_back(status_byte);
-  }
+  uint8_t data[3] = { status_byte, data1, data2 };
   size_t dataByteLength = getDataByteLength(status_byte);
-  if (dataByteLength > 0) {
-    _send_data.push_back(data1);
-    if (dataByteLength > 1) {
-      _send_data.push_back(data2);
-    }
+  _transport->addMessage(data, dataByteLength + 1);
+/*
+if (_send_data.size() >= _send_buffer_size - 3) {
+  sendFlush();
+}
+if (_send_runningStatus != status_byte) {
+  _send_runningStatus = status_byte;
+  sendFlush();
+  _send_data.push_back(status_byte);
+}
+size_t dataByteLength = getDataByteLength(status_byte);
+if (dataByteLength > 0) {
+  _send_data.push_back(data1);
+  if (dataByteLength > 1) {
+    _send_data.push_back(data2);
   }
+}
+*/
 }
 /*
 void MIDI_Encoder::pushMessage(const MIDI_Message& message)
@@ -94,6 +99,9 @@ bool MIDI_Decoder::popMessage(MIDI_Message* message)
 {
   if (_data.empty()) { return false; }
 // printf("popMessage : data.size:%d\n", _data.size());
+//  printf("len:%d  data:%02X %02X %02X\n", _data.size(), _data[0], _data[1], _data[2]);
+//  fflush(stdout);
+
   size_t index = 0;
   if (_data[index] & 0x80) { // Status byte
     message->status = _data[index++];
@@ -104,22 +112,55 @@ bool MIDI_Decoder::popMessage(MIDI_Message* message)
 // printf("popMessage : invalid data erase : index:%d\n", index);
       _data.erase(_data.begin(), _data.begin() + index);
       return false;
+      // index = 0;
+      // _runningStatus = message->status;
     }
     message->status = _runningStatus;
   }
   size_t dataByteLength = getDataByteLength(message->status);
-  if (dataByteLength == -1) { return false; }
-
-  if (dataByteLength == 0 && message->status == 0xF0)
-  { // System Exclusive
-    size_t index_end = index;
-    while (index_end < _data.size() && _data[index_end] != 0xF7) { ++index_end; }
-    if (index_end == _data.size()) { return false; }
-    message->data.assign(_data.begin() + index, _data.begin() + index_end);
-    _data.erase(_data.begin(), _data.begin() + index_end + 1);
-    return true;
+  if (dataByteLength == -1) {
+    _runningStatus = 0;
+// printf("popMessage : invalid data status:%02x\n", message->status);
+    _data.erase(_data.begin());
+    // _data.erase(_data.begin(), _data.begin() + index);
+    return false;
   }
-  if (index + dataByteLength > _data.size()) { return false; }
+
+  if (dataByteLength == 0) {
+    _runningStatus = 0;
+    if (message->status == 0xF0)
+    { // System Exclusive
+      size_t index_end = index;
+      // while (index_end < _data.size() && _data[index_end] != 0xF7) { ++index_end; }
+      while (index_end < _data.size() && ((_data[index_end] & 0x80) == 0)) { ++index_end; }
+      if (index_end == _data.size()) {
+        // システムエクスクルーシブの終了がまだバッファに入っていない場合
+        return false;
+      }
+      auto data = _data[index_end];
+      if (data > 0xF7) {
+        // システムエクスクルーシブ中に、システム・リアルタイム・メッセージが来た場合
+        // 当該メッセージを先に出力する
+        message->status = data;
+        message->data.clear();
+        // 当該メッセージをバッファから削除
+        _data.erase(_data.begin() + index_end);
+        return true;
+      }
+      // if (_data[index_end] == 0xF7) {
+      //   ++index_end; // システムエクスクルーシブの終了バイトを含める
+      // }
+  // printf("sys ex:len:%d  , end:%02x\n", _data.size(), _data[index_end]);
+      message->data.assign(_data.begin() + index, _data.begin() + index_end);
+      _data.erase(_data.begin(), _data.begin() + index_end);
+      return true;
+    }
+  }
+  if (index + dataByteLength > _data.size()) {
+// printf("data len error: index:%d, dataByteLen:%d, data size:%d\n", index, dataByteLength, _data.size());
+// _data.clear();
+    return false;
+  }
   message->data.assign(_data.begin() + index, _data.begin() + index + dataByteLength);
   _data.erase(_data.begin(), _data.begin() + index + dataByteLength);
   return true;
