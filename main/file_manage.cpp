@@ -48,60 +48,60 @@ asm (\
 
 #else
 
-#define IMPORT_FILE(section, srcfile, dstfile, symbol) \
-static constexpr const char* filename_##symbol = dstfile; \
+#define IMPORT_FILE(section, filename, symbol) \
+static constexpr const char* filename_##symbol = filename; \
 extern const uint8_t symbol[], sizeof_##symbol[]; \
 asm (\
   ".section " #section "\n"\
   ".balign 4\n"\
   ".global " #symbol "\n"\
   #symbol ":\n"\
-  ".incbin \"incbin/preset/" srcfile "\"\n"\
+  ".incbin \"incbin/preset/" filename "\"\n"\
   ".global sizeof_" #symbol "\n"\
   ".set sizeof_" #symbol ", . - " #symbol "\n"\
   ".balign 4\n"\
   ".section \".text\"\n")
 #endif
 
-IMPORT_FILE(.rodata, "00_Simple_Guitar.json", "Simple_Guitar.json"       ,  preset_00 );
-IMPORT_FILE(.rodata, "01_Simple_Gtrx2.json" , "Simple_Guitarx2.json"     ,  preset_01 );
-IMPORT_FILE(.rodata, "02_Simple_Piano.json" , "Simple_Piano.json"        ,  preset_02 );
-IMPORT_FILE(.rodata, "11_Pop_01.json"       , "Pop01_16beatSw.json"      ,  preset_11 );
-IMPORT_FILE(.rodata, "12_Pop_02.json"       , "Pop02_BlueW.json"         ,  preset_12 );
-IMPORT_FILE(.rodata, "13_Pop_03.json"       , "Pop03_Yobikomi.json"      ,  preset_13 );
-IMPORT_FILE(.rodata, "14_Pop_04.json"       , "Pop04_ObLaDi.json"        ,  preset_14 );
-IMPORT_FILE(.rodata, "15_Pop_05.json"       , "Pop05_Ageha.json"         ,  preset_15 );
-IMPORT_FILE(.rodata, "16_Pop_06.json"       , "Pop06_Sofmap.json"        ,  preset_16 );
-IMPORT_FILE(.rodata, "17_Pop_07.json"       , "Pop07_DonQui.json"        ,  preset_17 );
-IMPORT_FILE(.rodata, "18_Pop_08.json"       , "Pop08_Aozora.json"        ,  preset_18 );
-IMPORT_FILE(.rodata, "19_Pop_09.json"       , "Pop09_Standard.json"      ,  preset_19 );
-IMPORT_FILE(.rodata, "1A_Pop_10.json"       , "Pop10_Kaiju.json"         ,  preset_1A );
-IMPORT_FILE(.rodata, "21_Rock_01.json"      , "Rock01_Iine.json"         ,  preset_21 );
-IMPORT_FILE(.rodata, "22_Rock_02.json"      , "Rock02_GtrKids.json"      ,  preset_22 );
-IMPORT_FILE(.rodata, "23_Rock_03.json"      , "Rock03_LovePhntm.json"    ,  preset_23 );
-IMPORT_FILE(.rodata, "24_Rock_04.json"      , "Rock04_Standard.json"     ,  preset_24 );
-IMPORT_FILE(.rodata, "25_Rock_05.json"      , "Rock05_Train.json"        ,  preset_25 );
-IMPORT_FILE(.rodata, "26_Rock_06.json"      , "Rock06_Ketobase.json"     ,  preset_26 );
-IMPORT_FILE(.rodata, "27_Rock_07.json"      , "Rock07_8Beat.json"        ,  preset_27 );
-IMPORT_FILE(.rodata, "31_Folk_01.json"      , "Folk01_Tombo.json"        ,  preset_31 );
-IMPORT_FILE(.rodata, "32_Folk_02.json"      , "Folk02_Stand.json"        ,  preset_32 );
-IMPORT_FILE(.rodata, "41_Ballade_01.json"   , "Ballade01_Lovin.json"     ,  preset_41 );
-IMPORT_FILE(.rodata, "42_Ballade_02.json"   , "Ballade02_Shonen.json"    ,  preset_42 );
-IMPORT_FILE(.rodata, "43_Ballade_03.json"   , "Ballade03_Yell.json"      ,  preset_43 );
-IMPORT_FILE(.rodata, "44_Ballade_04.json"   , "Ballade04_Hakujitsu.json" ,  preset_44 );
-IMPORT_FILE(.rodata, "45_Ballade_05.json"   , "Ballade05_Lovex3.json"    ,  preset_45 );
-IMPORT_FILE(.rodata, "51_Dance_01.json"     , "Dance01_GetWild.json"     ,  preset_51 );
-IMPORT_FILE(.rodata, "52_Dance_02.json"     , "Dance02_USA.json"         ,  preset_52 );
-IMPORT_FILE(.rodata, "53_Dance_03.json"     , "Dance03_Euro.json"        ,  preset_53 );
-IMPORT_FILE(.rodata, "54_Dance_04.json"     , "Dance04_Virtual.json"     ,  preset_54 );
-IMPORT_FILE(.rodata, "61_Punk_01.json"      , "Punk01_Linda.json"        ,  preset_61 );
-IMPORT_FILE(.rodata, "62_Punk_02.json"      , "Punk02_Natsu.json"        ,  preset_62 );
-IMPORT_FILE(.rodata, "71_Game_01.json"      , "Game01_Star.json"         ,  preset_71 );
-IMPORT_FILE(.rodata, "72_Game_02.json"      , "Game02_Chrono.json"       ,  preset_72 );
-IMPORT_FILE(.rodata, "81_Samba_1.json"      , "Samba_1.json"             ,  preset_81 );
-IMPORT_FILE(.rodata, "82_Ska_1.json"        , "Ska_1.json"               ,  preset_82 );
-IMPORT_FILE(.rodata, "83_Orchestra_1.json"  , "Orchestra_1.json"         ,  preset_83 );
-IMPORT_FILE(.rodata, "84_Orchestra_2.json"  , "Orchestra_2.json"         ,  preset_84 );
+IMPORT_FILE(.rodata, "Simple_Guitar.json"       ,  preset_00 );
+IMPORT_FILE(.rodata, "Simple_Guitarx2.json"     ,  preset_01 );
+IMPORT_FILE(.rodata, "Simple_Piano.json"        ,  preset_02 );
+IMPORT_FILE(.rodata, "Pop01_16beatSw.json"      ,  preset_11 );
+IMPORT_FILE(.rodata, "Pop02_BlueW.json"         ,  preset_12 );
+IMPORT_FILE(.rodata, "Pop03_Yobikomi.json"      ,  preset_13 );
+IMPORT_FILE(.rodata, "Pop04_ObLaDi.json"        ,  preset_14 );
+IMPORT_FILE(.rodata, "Pop05_Ageha.json"         ,  preset_15 );
+IMPORT_FILE(.rodata, "Pop06_Sofmap.json"        ,  preset_16 );
+IMPORT_FILE(.rodata, "Pop07_DonQui.json"        ,  preset_17 );
+IMPORT_FILE(.rodata, "Pop08_Aozora.json"        ,  preset_18 );
+IMPORT_FILE(.rodata, "Pop09_Standard.json"      ,  preset_19 );
+IMPORT_FILE(.rodata, "Pop10_Kaiju.json"         ,  preset_1A );
+IMPORT_FILE(.rodata, "Rock01_Iine.json"         ,  preset_21 );
+IMPORT_FILE(.rodata, "Rock02_GtrKids.json"      ,  preset_22 );
+IMPORT_FILE(.rodata, "Rock03_LovePhntm.json"    ,  preset_23 );
+IMPORT_FILE(.rodata, "Rock04_Standard.json"     ,  preset_24 );
+IMPORT_FILE(.rodata, "Rock05_Train.json"        ,  preset_25 );
+IMPORT_FILE(.rodata, "Rock06_Ketobase.json"     ,  preset_26 );
+IMPORT_FILE(.rodata, "Rock07_8Beat.json"        ,  preset_27 );
+IMPORT_FILE(.rodata, "Folk01_Tombo.json"        ,  preset_31 );
+IMPORT_FILE(.rodata, "Folk02_Stand.json"        ,  preset_32 );
+IMPORT_FILE(.rodata, "Ballade01_Lovin.json"     ,  preset_41 );
+IMPORT_FILE(.rodata, "Ballade02_Shonen.json"    ,  preset_42 );
+IMPORT_FILE(.rodata, "Ballade03_Yell.json"      ,  preset_43 );
+IMPORT_FILE(.rodata, "Ballade04_Hakujitsu.json" ,  preset_44 );
+IMPORT_FILE(.rodata, "Ballade05_Lovex3.json"    ,  preset_45 );
+IMPORT_FILE(.rodata, "Dance01_GetWild.json"     ,  preset_51 );
+IMPORT_FILE(.rodata, "Dance02_USA.json"         ,  preset_52 );
+IMPORT_FILE(.rodata, "Dance03_Euro.json"        ,  preset_53 );
+IMPORT_FILE(.rodata, "Dance04_Virtual.json"     ,  preset_54 );
+IMPORT_FILE(.rodata, "Punk01_Linda.json"        ,  preset_61 );
+IMPORT_FILE(.rodata, "Punk02_Natsu.json"        ,  preset_62 );
+IMPORT_FILE(.rodata, "Game01_Star.json"         ,  preset_71 );
+IMPORT_FILE(.rodata, "Game02_Chrono.json"       ,  preset_72 );
+IMPORT_FILE(.rodata, "Samba_1.json"             ,  preset_81 );
+IMPORT_FILE(.rodata, "Ska_1.json"               ,  preset_82 );
+IMPORT_FILE(.rodata, "Orchestra_1.json"         ,  preset_83 );
+IMPORT_FILE(.rodata, "Orchestra_2.json"         ,  preset_84 );
 
 namespace kanplay_ns {
 
@@ -160,11 +160,12 @@ storage_incbin_t storage_incbin;
 file_manage_t file_manage;
 
 static dir_manage_t dir_manage[def::app::data_type_t::data_type_max] =
-{ { nullptr          , "" },
-  { &storage_sd      , def::app::data_path[0] },
-  { &storage_sd      , def::app::data_path[1] },
-  { &storage_incbin  , def::app::data_path[2] },
-  { &storage_littlefs, def::app::data_path[3] },
+{ { nullptr          ,                     "" }, // data_unknown
+  { &storage_sd      , def::app::data_path[0] }, // data_song_users
+  { &storage_sd      , def::app::data_path[1] }, // data_song_extra
+  { &storage_incbin  , def::app::data_path[2] }, // data_song_preset
+  { &storage_littlefs, def::app::data_path[3] }, // data_setting
+  { &storage_littlefs, def::app::data_path[4] }, // data_resume
 };
 
 static std::string trimExtension(const std::string& filename)
@@ -456,6 +457,8 @@ int storage_littlefs_t::loadFromFileToMemory(const char* path, uint8_t* dst, siz
 
   int len = -1;
 #if __has_include(<LittleFS.h>)
+bool exists = LittleFS.exists(path);
+M5_LOGE("LittleFS open:%s exists:%d", path, exists);
   if (!LittleFS.exists(path)) { return len; }
   auto file = LittleFS.open(path);
   if (!file) { return len; }
@@ -490,19 +493,21 @@ int storage_littlefs_t::saveFromMemoryToFile(const char* path, const uint8_t* da
 {
   if (!_is_begin) { return -1; }
 
+  const char* tmpfile = "/.tmpsave.tmp";
   size_t writelen = 0;
 #if __has_include(<LittleFS.h>)
-  auto file = LittleFS.open(path, FILE_WRITE);
+  // 一旦テンポラリファイルに保存する。
+  auto file = LittleFS.open(tmpfile, FILE_WRITE, true);
   if (!file) {
     return -1;
   }
-  do {
-    size_t len = std::min(length, 4096u);
-    length -= len;
-    writelen += file.write(data, len);
-    taskYIELD();
-  } while (length);
+  writelen = file.write(data, length);
   file.close();
+  taskYIELD();
+  // 元のファイルを削除してリネームする。
+  LittleFS.remove(path);
+  LittleFS.rename(tmpfile, path);
+
 #else
   if (path[0] == '/') { ++path; }
   auto FP = fopen(path, "w");
@@ -637,6 +642,16 @@ bool dir_manage_t::update(void)
   return result >= 0;
 }
 
+int dir_manage_t::search(const char* filename)
+{
+  for (size_t i = 0; i < _files.size(); ++i) {
+    if (_files[i].filename == filename) {
+      return i;
+    }
+  }
+  return -1;
+}
+
 std::string dir_manage_t::getFullPath(size_t index)
 {
   if (index >= _files.size()) { return ""; }
@@ -664,6 +679,7 @@ bool file_manage_t::updateFileList(def::app::data_type_t dir_type)
 {
   M5_LOGV("updateFileList");
   auto dir = getDirManage(dir_type);
+  if (dir == nullptr) { return false; }
   if (!dir->update()) {
     auto st = dir->getStorage();
     st->endStorage();
@@ -671,6 +687,17 @@ bool file_manage_t::updateFileList(def::app::data_type_t dir_type)
     return !dir->update();
   }
   return true;
+}
+
+void file_manage_t::setLatestFileInfo(const char* filename, def::app::data_type_t data_type)
+{
+  if (data_type == def::app::data_type_t::data_song_preset
+   || data_type == def::app::data_type_t::data_song_users
+   || data_type == def::app::data_type_t::data_song_extra) {
+    _latest_data_type = data_type;
+    _latest_file_name = (filename != nullptr) ? filename : "";
+    _display_file_name = trimExtension(_latest_file_name);
+  }
 }
 
 memory_info_t* file_manage_t::createMemoryInfo(size_t length)
@@ -695,7 +722,7 @@ const memory_info_t* file_manage_t::loadFile(def::app::data_type_t dir_type, siz
 {
   auto dir = getDirManage(dir_type);
   if (index >= dir->getCount()) {
-    dir->update();
+    updateFileList(dir_type);
   }
   if ((int16_t)index < 0) { // マイナス指定されている場合は末尾側として扱えるようにindexを加算する
     index = ((int16_t)index) + dir->getCount();
@@ -712,8 +739,7 @@ const memory_info_t* file_manage_t::loadFile(def::app::data_type_t dir_type, siz
       memory->filename = fullpath;
       auto storage = dir->getStorage();
       if (0 <= storage->loadFromFileToMemory(fullpath.c_str(), memory->data, memory->size, index)) {
-        auto fn = trimExtension(info->filename);
-        _display_file_name = fn;
+        setLatestFileInfo(info->filename.c_str(), dir_type);
         return memory;
       }
     }
@@ -749,8 +775,7 @@ bool file_manage_t::saveFile(def::app::data_type_t dir_type, size_t memory_index
     return false;
   }
   if (!mem->filename.empty()) {
-    auto fn = trimExtension(mem->filename);
-    _display_file_name = fn;
+    setLatestFileInfo(mem->filename.c_str(), dir_type);
   }
 
   return true;

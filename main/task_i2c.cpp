@@ -86,10 +86,15 @@ TODO:CoreS3でのSDカード挿抜状態判定を追加する
           gui.procTouchControl(td);
         }
         if (M5.BtnPWR.wasHold()) {
-          system_registry.operator_command.addQueue( { def::command::power_control, 0 } );
+          system_registry.operator_command.addQueue( { def::command::system_control, def::command::system_control_t::sc_power_off } );
         }
 
         if (M5.BtnPWR.wasClicked() && M5.BtnPWR.getClickCount() == 8) {
+if (system_registry.runtime_info.getDeveloperMode()) {
+system_registry.operator_command.addQueue( { def::command::system_control, def::command::system_control_t::sc_erase_nvs } );
+}
+
+
           system_registry.runtime_info.setDeveloperMode(true);
           system_registry.popup_notify.setPopup(true, def::notify_type_t::NOTIFY_DEVELOPER_MODE);
         }
@@ -125,8 +130,8 @@ TODO:CoreS3でのSDカード挿抜状態判定を追加する
             while (t > time(nullptr)) M5.delay(1);  /// Synchronization in seconds
             M5.Rtc.setDateTime( gmtime( &t ) );
           }
-          M5.delay(128);
-          if (off == 2) {
+          system_registry.file_command.wait();
+          if (off == def::command::system_control_t::sc_reset) {
             esp_restart();
           }
           M5.Power.powerOff();
@@ -139,16 +144,23 @@ TODO:CoreS3でのSDカード挿抜状態判定を追加する
           M5.Display.setBrightness(br);
         }
 
-        static def::command::midiport_info_t prev_usb_port_info;
-        auto usb_port_info = system_registry.runtime_info.getMidiPortStateUSB();
-        if (prev_usb_port_info != usb_port_info)
-        { // USBホスト使用時はUSBへの電源供給をオンにする
-          prev_usb_port_info = usb_port_info;
-          if (usb_port_info == def::command::midiport_info_t::mp_off) {
-            M5.Power.setUsbOutput(false);
+        static bool prev_usb_power_enabled = false;
+        bool usb_power_enabled = system_registry.midi_port_setting.getUSBPowerEnabled();
+        if (usb_power_enabled) {
+          // InstaChordリンクがUSBポートの場合は電力供給はしない
+          if (system_registry.midi_port_setting.getInstaChordLinkPort() == def::command::instachord_link_port_t::iclp_usb) {
+            usb_power_enabled = false;
+          } else // USBホストモードでない場合は電力供給はしない
+          if (system_registry.midi_port_setting.getUSBMode() != def::command::usb_mode_t::usb_host) {
+            usb_power_enabled = false;
           } else {
-            M5.Power.setUsbOutput(true);
+            usb_power_enabled = (system_registry.runtime_info.getMidiPortStateUSB() != def::command::midiport_info_t::mp_off);
           }
+        }
+        if (prev_usb_power_enabled != usb_power_enabled)
+        { // USBホスト使用時はUSBへの電源供給をオンにする
+          prev_usb_power_enabled = usb_power_enabled;
+          M5.Power.setUsbOutput(usb_power_enabled);
         }
       }
     }

@@ -24,8 +24,8 @@ private:
   void procChordModifier(const def::command::command_param_t& command_param, const bool is_pressed);
   void procChordMinorSwap(const def::command::command_param_t& command_param, const bool is_pressed);
   void procChordSemitone(const def::command::command_param_t& command_param, const bool is_pressed);
-  void procChordBaseDegree(const def::command::command_param_t& command_param, const bool is_pressed);
-  void procChordBaseSemitone(const def::command::command_param_t& command_param, const bool is_pressed);
+  void procChordBassDegree(const def::command::command_param_t& command_param, const bool is_pressed);
+  void procChordBassSemitone(const def::command::command_param_t& command_param, const bool is_pressed);
   void procEditFunction(const def::command::command_param_t& command_param);
   void setSlotIndex(uint8_t slot_index);
 
@@ -34,6 +34,7 @@ private:
   void changeSubbuttonMapping(const uint32_t *map);
 
   void afterMenuClose(void);
+  void syncButtonColor(void);
 
   uint8_t _modifier_press_order[8];
   uint8_t _base_degree_press_order[8];

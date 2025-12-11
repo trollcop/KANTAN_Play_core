@@ -4,6 +4,8 @@
 #ifndef KANPLAY_SYSTEM_REGISTRY_HPP
 #define KANPLAY_SYSTEM_REGISTRY_HPP
 
+#include <ArduinoJson.h>
+
 #include <assert.h>
 
 #include "registry.hpp"
@@ -23,15 +25,27 @@ class system_registry_t;
 extern system_registry_t system_registry;
 
 class system_registry_t {
+    bool loadSettingInternal(JsonVariant& json);
+    bool saveSettingInternal(JsonVariant& json);
+
 public:
     void init(void);
 
     void reset(void);
-    void save(void);
-    void load(void);
+    bool save(void);
+    bool saveSetting(void);
+    bool saveResume(void);
+
+    bool load(void);
+    bool loadSetting(void);
+    bool loadResume(void);
 
     size_t saveSettingJSON(uint8_t* data, size_t data_length);
     bool loadSettingJSON(const uint8_t* data, size_t data_length);
+    size_t saveResumeJSON(uint8_t* data, size_t data_length);
+    bool loadResumeJSON(const uint8_t* data, size_t data_length);
+
+    void syncParams(void);
 
     struct reg_working_command_t {
         void set(const def::command::command_param_t& command_param);
@@ -130,6 +144,8 @@ protected:
             INSTACHORD_LINK_PORT,
             INSTACHORD_LINK_DEV,
             INSTACHORD_LINK_STYLE,
+            USB_POWER_ENABLED, // USB給電 オン・オフ
+            USB_MODE,          // USBモード(Host/Device)
         };
         void setPortCMIDI(def::command::ex_midi_mode_t mode) { set8(PORT_C_MIDI, static_cast<uint8_t>(mode)); }
         def::command::ex_midi_mode_t getPortCMIDI(void) const { return static_cast<def::command::ex_midi_mode_t>(get8(PORT_C_MIDI)); }
@@ -148,11 +164,17 @@ protected:
 
         void setInstaChordLinkStyle(def::command::instachord_link_style_t style) { set8(INSTACHORD_LINK_STYLE, static_cast<uint8_t>(style)); }
         def::command::instachord_link_style_t getInstaChordLinkStyle(void) const { return static_cast<def::command::instachord_link_style_t>(get8(INSTACHORD_LINK_STYLE)); }
+
+        void setUSBPowerEnabled(bool enabled) { set8(USB_POWER_ENABLED, enabled); }
+        bool getUSBPowerEnabled(void) const { return static_cast<bool>(get8(USB_POWER_ENABLED)); }
+
+        void setUSBMode(def::command::usb_mode_t mode) { set8(USB_MODE, static_cast<uint8_t>(mode)); }
+        def::command::usb_mode_t getUSBMode(void) const { return static_cast<def::command::usb_mode_t>(get8(USB_MODE)); }
     } midi_port_setting;
 
     // 実行時に変化する情報 (設定画面が存在しない可変情報)
     struct reg_runtime_info_t : public registry_t {
-        reg_runtime_info_t(void) : registry_t(36, 0, DATA_SIZE_8) {}
+        reg_runtime_info_t(void) : registry_t(40, 0, DATA_SIZE_8) {}
         enum index_t : uint16_t {
             PART_EFFECT_1,
             PART_EFFECT_2,
@@ -177,6 +199,7 @@ protected:
             PLAY_MODE,
             MENU_VISIBLE,
             CHORD_AUTOPLAY_STATE,
+            SUSTAIN_STATE,
             EDIT_VELOCITY,
             BUTTON_MAPPING_SWITCH,
             DEVELOPER_MODE,
@@ -270,6 +293,9 @@ protected:
         void setChordAutoplayState(def::play::auto_play_mode_t mode) { set8(CHORD_AUTOPLAY_STATE, mode); }
         def::play::auto_play_mode_t getChordAutoplayState(void) const { return (def::play::auto_play_mode_t)get8(CHORD_AUTOPLAY_STATE); }
 
+        void setSustainState(def::play::sustain_state_t state) { set8(SUSTAIN_STATE, state); }
+        def::play::sustain_state_t getSustainState(void) const { return (def::play::sustain_state_t)get8(SUSTAIN_STATE); }
+
         // 編集時のベロシティ
         void setEditVelocity(int8_t level) { set8(EDIT_VELOCITY, level); }
         int8_t getEditVelocity(void) const { return (int8_t)get8(EDIT_VELOCITY); }
@@ -284,7 +310,7 @@ protected:
         bool getDeveloperMode(void) const { return get8(DEVELOPER_MODE); }
 
         // MIDIチャンネルボリュームの最大値
-        // ※ Instachord Link時に85に下げる。通常時は127とする
+        // ※ Instachord Link時に下げる。通常時は127とする
         void setMIDIChannelVolumeMax(uint8_t max_volume) { set8(MIDI_CHVOL_MAX, max_volume); }
         uint8_t getMIDIChannelVolumeMax(void) const { return get8(MIDI_CHVOL_MAX); }
 
@@ -326,17 +352,19 @@ protected:
     } runtime_info;
 
     struct reg_popup_notify_t : public registry_t {
-        reg_popup_notify_t(void) : registry_t(8, 8, DATA_SIZE_8) {}
-        enum index_t : uint16_t {
+        reg_popup_notify_t(void) : registry_t(8, 4, DATA_SIZE_8) {}
+        enum category_t : uint16_t {
             ERROR_NOTIFY = 0x00,
             SUCCESS_NOTIFY = 0x01,
+            MESSAGE = 0x02,
         };
         void setPopup(bool is_success, def::notify_type_t notify) { set8(is_success ? SUCCESS_NOTIFY : ERROR_NOTIFY, notify, true); }
-        bool getPopupHistory(history_code_t &code, def::notify_type_t &notify_type, bool &is_success) {
+        void setMessage(def::notify_type_t notify) { set8(MESSAGE, notify, true); }
+        bool getPopupHistory(history_code_t &code, def::notify_type_t &notify_type, category_t &category) {
             auto history = getHistory(code);
             if (history == nullptr) { return false; }
             notify_type = static_cast<def::notify_type_t>(history->value);
-            is_success = (history->index == SUCCESS_NOTIFY);
+            category = static_cast<category_t>(history->index);
             return true;
         }
     } popup_notify;
@@ -351,19 +379,23 @@ protected:
     } popup_qr;
 
     struct reg_wifi_control_t : public registry_t {
-        reg_wifi_control_t(void) : registry_t(16, 0, DATA_SIZE_8) {}
+        reg_wifi_control_t(void) : registry_t(8, 0, DATA_SIZE_8) {}
         enum index_t : uint16_t {
-            MODE,
+            WIFIMODE,
             OPERATION,
+            WEBSERVER,
         };
 
         // WiFi APモード
-        void setMode(def::command::wifi_mode_t ctrl) { set8(MODE, static_cast<uint8_t>(ctrl)); }
-        def::command::wifi_mode_t getMode(void) const { return static_cast<def::command::wifi_mode_t>(get8(MODE)); }
+        void setWifiMode(def::command::wifi_mode_t ctrl) { set8(WIFIMODE, static_cast<uint8_t>(ctrl)); }
+        def::command::wifi_mode_t getWifiMode(void) const { return static_cast<def::command::wifi_mode_t>(get8(WIFIMODE)); }
 
         // WiFi 操作指示
         void setOperation(def::command::wifi_operation_t operation) { set8(OPERATION, static_cast<uint8_t>(operation)); }
         def::command::wifi_operation_t getOperation(void) const { return static_cast<def::command::wifi_operation_t>(get8(OPERATION)); }
+
+        void setWebServerMode(def::command::webserver_mode_t value) { set8(WEBSERVER, static_cast<uint8_t>(value)); }
+        def::command::webserver_mode_t getWebServerMode(void) const { return static_cast<def::command::webserver_mode_t>(get8(WEBSERVER)); }
     } wifi_control;
 
     struct reg_sub_button_t : public registry_t {
@@ -495,6 +527,7 @@ protected:
             setMessage((status | channel), note, value & 0x7F);
         }
         void setProgramChange(uint8_t channel, uint8_t value) {
+            _program_number[channel] = value;
             uint8_t status = 0xC0;
             setMessage((status | channel), value);
         }
@@ -503,8 +536,18 @@ protected:
             setMessage((status | channel), control, value);
         }
         void setChannelVolume(uint8_t channel, uint8_t value) {
+            _channel_volume[channel] = value;
             setControlChange(channel, 7, value);
         }
+        uint8_t getProgramChange(uint8_t channel) const {
+            return _program_number[channel];
+        }
+        uint8_t getChannelVolume(uint8_t channel) const {
+            return _channel_volume[channel];
+        }
+    protected:
+        uint8_t _channel_volume[def::midi::channel_max] = { 0, };
+        uint8_t _program_number[def::midi::channel_max] = { 0, };
     } midi_out_control;
 
     // コード演奏アルペジオパターン
@@ -845,7 +888,7 @@ protected:
     };
 
     struct reg_file_command_t : public registry_t {
-        reg_file_command_t(void) : registry_t(16, 4, DATA_SIZE_32) {}
+        reg_file_command_t(void) : registry_t(16, 8, DATA_SIZE_32) {}
         enum index_t : uint8_t {
             CURRENT_SONG_INFO = 0x00,
             UPDATE_LIST = 0x04,
@@ -854,12 +897,23 @@ protected:
         };
         void setCurrentSongInfo(const def::app::file_command_info_t& info) { set32(CURRENT_SONG_INFO, info.raw, true); }
         def::app::file_command_info_t getCurrentSongInfo(void) const { return def::app::file_command_info_t(get32(CURRENT_SONG_INFO)); }
+
+        void wait(void);
+
+        void waitUpdateList(void);
         void setUpdateList(const def::app::file_command_info_t& info) { set32(UPDATE_LIST, info.raw, true); }
         def::app::file_command_info_t getUpdateList(void) const { return def::app::file_command_info_t(get32(UPDATE_LIST)); }
-        void setFileLoadRequest(const def::app::file_command_info_t& info) { set32(FILE_LOAD, info.raw, true); }
+        void clearUpdateList(void) { set32(UPDATE_LIST, 0, false); }
+
+        void waitFileLoad(void);
+        void setFileLoadRequest(const def::app::file_command_info_t& info) { waitFileLoad(); set32(FILE_LOAD, info.raw, true); }
         def::app::file_command_info_t getFileLoadRequest(void) const { return def::app::file_command_info_t(get32(FILE_LOAD)); }
-        void setFileSaveRequest(const def::app::file_command_info_t& info) { set32(FILE_SAVE, info.raw, true); }
+        void clearFileLoadRequest(void) { set32(FILE_LOAD, 0, false); }
+
+        void waitFileSave(void);
+        void setFileSaveRequest(const def::app::file_command_info_t& info) { waitFileSave(); set32(FILE_SAVE, info.raw, true); }
         def::app::file_command_info_t getFileSaveRequest(void) const { return def::app::file_command_info_t(get32(FILE_SAVE)); }
+        void clearFileSaveRequest(void) { set32(FILE_SAVE, 0, false); }
     };
 
     struct reg_song_info_t : public registry_t {
@@ -1106,14 +1160,13 @@ protected:
     reg_sub_button_t       sub_button;          // サブボタンのコマンド
     reg_internal_input_t   internal_input;      // かんぷれ本体ボタンの入力状態
     reg_internal_imu_t     internal_imu;        // かんぷれ本体のIMU情報
-    reg_rgbled_control_t   button_basecolor;    // かんぷれ本体ボタンおよび画面上のボタンの色 (操作状態を反映する前の色)
     reg_rgbled_control_t   rgbled_control;      // かんぷれ本体ボタンのカラーLED制御(操作状態が反映された色)
 
     reg_command_request_t  operator_command;    // コマンダーからオペレータへの全体的な動作指示
     reg_command_request_t  player_command;      // オペレータから演奏部への指示に限定したコマンド
 
     reg_chord_play_t       chord_play;          // コード演奏情報
-    kanplay_slot_t*        current_slot;        // 現在の操作対象スロット(編集中のスロット)
+    kanplay_slot_t*        current_slot = &song_data.slot[0];        // 現在の操作対象スロット(編集中のスロット)
     song_data_t            song_data;           // 演奏対象のソングデータ スロット1~8のデータ (保存用)
 
     // // 一時預かりデータ。ファイルから読込処理を行う際の一時利用や、編集モードに移行する前に元の状態を保持する
@@ -1135,8 +1188,8 @@ protected:
 
     reg_command_mapping_t command_mapping_custom_main { def::hw::max_button_mask };  // メインボタンの割当カスタマイズテーブル
 
-    kanplay_slot_t       clipboard_slot;      // クリップボードデータ。コピー/カットしたデータを一時的に保持する
-    reg_arpeggio_table_t clipboard_arpeggio;  // クリップボードデータ。コピー/カットしたデータを一時的に保持する
+    kanplay_slot_t       clipboard_slot;      // コピー/ペースト(クリップボード)データ。コピー/カットしたデータを一時的に保持する
+    reg_arpeggio_table_t clipboard_arpeggio;  // コピー/ペースト(クリップボード)データ。コピー/カットしたデータを一時的に保持する
 
     enum clipboard_contetn_t : uint8_t {
         CLIPBOARD_CONTENT_NONE,
@@ -1144,7 +1197,7 @@ protected:
         CLIPBOARD_CONTENT_PART,
         CLIPBOARD_CONTENT_ARPEGGIO,
     };
-    clipboard_contetn_t clipboard_content;    // クリップボードの内容
+    clipboard_contetn_t clipboard_content;    // コピー/ペースト(クリップボード)の内容
 
     registry_t drum_mapping { 16, 0, registry_t::DATA_SIZE_8 }; // ドラム演奏モードのコマンドとノートナンバーのマッピングテーブル
 

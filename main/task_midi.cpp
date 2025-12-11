@@ -30,11 +30,38 @@ private:
   bool _flg_instachord_out = false;
   bool _flg_instachord_pad = false;
 
+#if __has_include(<freertos/freertos.h>)
+  TaskHandle_t _handle = nullptr;
+#else
+  SDL_Thread* _handle = nullptr;
+#endif
+
 public:
   subtask_midi_t(midi_driver::MIDI_Transport* transport, system_registry_t::reg_task_status_t::bitindex_t task_status_index)
   : _midi { transport }
   , _task_status_index { task_status_index }
   {
+  }
+
+  void start(void)
+  {
+    if (_handle == nullptr) {
+      _midi.begin();
+#if __has_include(<freertos/freertos.h>)
+      xTaskCreatePinnedToCore((TaskFunction_t)task_func, "midi_subtask", 1024*3, this, def::system::task_priority_midi_sub, &_handle, def::system::task_cpu_midi_sub);
+#else
+      _handle = SDL_CreateThread((SDL_ThreadFunction)task_func, "midi_subtask", this);
+#endif
+    }
+  }
+
+  void execNotify(void)
+  {
+    if (_handle != nullptr) {
+#if __has_include(<freertos/freertos.h>)
+      xTaskNotifyGive(_handle);
+#endif
+    }
   }
 
   void setInstaChordLink(bool enable, def::command::instachord_link_dev_t dev, def::command::instachord_link_style_t style) {
@@ -53,9 +80,6 @@ public:
     bool prev_tx_enable = false;
     bool prev_rx_enable = false;
     uint8_t prev_slot_key = 255;
-    uint8_t channel_volume[def::midi::channel_max] = { 0, };
-    uint8_t program_number[def::midi::channel_max] = { 0, };
-    memset(channel_volume, 100, sizeof(channel_volume));
 
     uint8_t tx_count = 0;
     uint8_t rx_count = 0;
@@ -83,6 +107,10 @@ public:
       if (rx_enable) {
         if (prev_rx_enable != rx_enable) {
           prev_rx_enable = rx_enable;
+        }
+        if (me->_flg_instachord_link && me->_flg_instachord_pad)
+        { // インスタコードリンクでパッド演奏が有効な場合は、自動演奏ビートモードにする
+          system_registry.runtime_info.setChordAutoplayState(def::play::auto_play_mode_t::auto_play_beatmode);
         }
         midi_driver::MIDI_Message message;
         while (midi->receiveMessage(&message)) {
@@ -154,8 +182,17 @@ public:
       bool queued = false;
       if (prev_tx_enable != tx_enable) {
         prev_tx_enable = tx_enable;
-        prev_midi_volume = 255;
+        if (tx_enable) {
+          prev_midi_volume = 255;
+          prev_slot_key = 255;
+          history_code_midi_out = system_registry.midi_out_control.getHistoryCode();
+          for (int i = 0; i < 16; ++i) { // CC#120はすべてのMIDI音を停止する
+            midi->sendControlChange(def::midi::channel_1 + i, 120, 0);
+          }
+          queued = true;
+        }
       }
+
       if (tx_enable) {
         if (me->_flg_instachord_link)
         { // InstaChord連携モードのときは、かんぷれ側のキー変更をインスタコード側に反映する
@@ -175,59 +212,39 @@ public:
           auto midi_volume = system_registry.user_setting.getMIDIMasterVolume();
           if (prev_midi_volume != midi_volume) {
             prev_midi_volume = midi_volume;
-            
+
             // マスターボリューム設定
             midi->sendControlChange(def::midi::channel_1, 99, 55);
             midi->sendControlChange(def::midi::channel_1, 98,  7);
             midi->sendControlChange(def::midi::channel_1,  6, midi_volume);
             for (int i = 0; i < 16; ++i) {
               // チャンネルボリュームおよびプログラムチェンジを設定
-              uint8_t vol = channel_volume[i];
+              uint8_t vol = system_registry.midi_out_control.getChannelVolume(i);
+              uint8_t prg = system_registry.midi_out_control.getProgramChange(i);
               midi->sendControlChange(def::midi::channel_1 + i, 7, vol);
-              uint8_t prg = program_number[i];
               midi->sendProgramChange(def::midi::channel_1 + i, prg);
   // printf("MIDI Channel %d Volume: %d, Program: %d\n", i, vol, prg);
   // fflush(stdout);
             }
             queued = true;
           }
-        }
-      }
-      const registry_t::history_t* history;
-      while (nullptr != (history = system_registry.midi_out_control.getHistory(history_code_midi_out))) {
-        uint8_t status = history->index & 0xFF;
-        uint8_t midi_ch = status & 0x0F;
-        uint8_t data1 = history->value & 0xFF;
-        uint8_t data2 = (history->value >> 8) & 0xFF;
-        bool send = true;
-        switch (status & 0xF0) {
-        case 0xB0: // Control Change
-          if (data1 == 7) { // Channel Volume
-            send = channel_volume[midi_ch] != data2;
-            channel_volume[midi_ch] = data2;
-          }
-          break;
 
-        case 0xC0: // Program Change
-          send = program_number[midi_ch] != data1;
-          program_number[midi_ch] = data1;
-          break;
-
-        default:
-          break;
-        }
-        if (send) {
-          if (tx_enable && (!me->_flg_instachord_link || me->_flg_instachord_out)) {
+          const registry_t::history_t* history;
+          while (nullptr != (history = system_registry.midi_out_control.getHistory(history_code_midi_out))) {
+            uint8_t status = history->index & 0xFF;
+            uint8_t midi_ch = status & 0x0F;
+            uint8_t data1 = history->value & 0xFF;
+            uint8_t data2 = (history->value >> 8) & 0xFF;
             midi->sendMessage(status, data1, data2);
             queued = true;
           }
         }
-      }
-      if (queued) {
-        // MIDI送信バッファをフラッシュ
-        if (midi->sendFlush()) {
-          tx_count++;
-        };
+        if (queued) {
+          // MIDI送信バッファをフラッシュ
+          if (midi->sendFlush()) {
+            tx_count++;
+          };
+        }
       }
 
       switch (me->_task_status_index) {
@@ -285,12 +302,6 @@ static subtask_midi_t* subtask_array[] = {
 #endif
 static constexpr const size_t max_subtask = sizeof(subtask_array)/sizeof(subtask_array[0]);
 
-#if defined (M5UNIFIED_PC_BUILD)
- SDL_Thread* subtask_handle[max_subtask];
-#else
- TaskHandle_t subtask_handle[max_subtask];
-#endif
-
 void task_midi_t::start(void)
 {
 
@@ -302,9 +313,6 @@ void task_midi_t::start(void)
   // windows_midi_transport.changeEnable(true, false);
 
   // auto thread = SDL_CreateThread((SDL_ThreadFunction)task_func, "midi", this);
-  for (int i = 0; i < max_subtask; ++i) {
-    subtask_handle[i] = SDL_CreateThread((SDL_ThreadFunction)subtask_midi_t::task_func, "midi_subtask", &subtask_array[i]);
-  }
 #else
   {
     midi_driver::MIDI_Transport_UART::config_t config;
@@ -314,7 +322,8 @@ void task_midi_t::start(void)
     config.pin_tx = def::hw::pin::midi_tx;
     config.pin_rx = GPIO_NUM_NC;
     in_uart_midi_transport.setConfig(config);
-    in_uart_midi_transport.begin();
+    in_uart_midi_subtask.start();
+    // in_uart_midi_transport.begin();
     in_uart_midi_transport.setUseTxRx(true, false);
 
     // 外部PortC用MIDI
@@ -322,14 +331,14 @@ void task_midi_t::start(void)
     config.pin_tx = M5.getPin(m5::pin_name_t::port_c_txd);
     config.pin_rx = M5.getPin(m5::pin_name_t::port_c_rxd);
     portc_midi_transport.setConfig(config);
-    portc_midi_transport.begin();
+    // portc_midi_transport.begin();
     // オン・オフはsystem_registryで設定する
   }
 #ifdef MIDI_TRANSPORT_BLE_HPP
   {
     midi_driver::MIDI_Transport_BLE::config_t config;
     ble_midi_transport.setConfig(config);
-    ble_midi_transport.begin();
+    // ble_midi_transport.begin();
     // オン・オフはsystem_registryで設定する
   }
 #endif
@@ -337,7 +346,7 @@ void task_midi_t::start(void)
   {
     midi_driver::MIDI_Transport_USB::config_t config;
     usb_midi_transport.setConfig(config);
-    usb_midi_transport.begin();
+    // usb_midi_transport.begin();
   }
 #endif
 
@@ -345,11 +354,8 @@ void task_midi_t::start(void)
   xTaskCreatePinnedToCore((TaskFunction_t)task_func, "midi", 1024*3, this, def::system::task_priority_midi, &handle, def::system::task_cpu_midi);
   system_registry.midi_out_control.setNotifyTaskHandle(handle);
   system_registry.midi_port_setting.setNotifyTaskHandle(handle);
-
-  for (int i = 0; i < max_subtask; ++i) {
-    xTaskCreatePinnedToCore((TaskFunction_t)subtask_midi_t::task_func, "midi_subtask", 1024*3, subtask_array[i], def::system::task_priority_midi_sub, &subtask_handle[i], def::system::task_cpu_midi_sub);
-  }
 #endif
+
 }
 
 void task_midi_t::task_func(task_midi_t* me)
@@ -368,6 +374,7 @@ void task_midi_t::task_func(task_midi_t* me)
 #ifdef MIDI_TRANSPORT_USB_HPP
   bool prev_usb_out = false;
   bool prev_usb_in = false;
+  def::command::usb_mode_t prev_usb_mode = def::command::usb_mode_t::usb_host;
 #endif
 
   auto prev_iclink_port = def::command::instachord_link_port_t::iclp_off;
@@ -421,6 +428,9 @@ void task_midi_t::task_func(task_midi_t* me)
     bool portc_out = portc_setting & def::command::ex_midi_mode_t::midi_output;
     bool portc_in  = portc_setting & def::command::ex_midi_mode_t::midi_input;
     if (prev_portc_out != portc_out || prev_portc_in != portc_in) {
+      if (portc_in || portc_out) {
+        portc_midi_subtask.start();
+      }
       prev_portc_out = portc_out;
       prev_portc_in  = portc_in;
       portc_midi_transport.setUseTxRx(portc_out, portc_in);
@@ -436,17 +446,16 @@ void task_midi_t::task_func(task_midi_t* me)
       ble_in = true;
     }
     if (prev_ble_out != ble_out || prev_ble_in != ble_in) {
-      // bool prev_en = prev_ble_out || prev_ble_in;
-      // bool en = ble_out || ble_in;
-      // if (prev_en != en) {
-      //   kanplay_ns::system_registry.runtime_info.setMidiPortStateBLE(en ? kanplay_ns::def::command::midiport_info_t::mp_enabled : kanplay_ns::def::command::midiport_info_t::mp_off);
-      // }
+      if (ble_in || ble_out) {
+        ble_midi_subtask.start();
+      }
       prev_ble_out = ble_out;
       prev_ble_in  = ble_in;
       ble_midi_transport.setUseTxRx(ble_out, ble_in);
     }
 #endif
 #ifdef MIDI_TRANSPORT_USB_HPP
+    auto usb_mode = system_registry.midi_port_setting.getUSBMode();
     auto usb_setting = system_registry.midi_port_setting.getUSBMIDI();
     bool usb_out = usb_setting & def::command::ex_midi_mode_t::midi_output;
     bool usb_in  = usb_setting & def::command::ex_midi_mode_t::midi_input;
@@ -454,21 +463,26 @@ void task_midi_t::task_func(task_midi_t* me)
     { // InstaChord Link USBモードのときは、USB-MIDIを有効にする
       usb_out = true;
       usb_in = true;
+      usb_mode = def::command::usb_mode_t::usb_host; // InstaChord Link USBモードのときは、USBホストにする
     }
-    if (prev_usb_out != usb_out || prev_usb_in != usb_in) {
-      // bool prev_en = prev_usb_out || prev_usb_in;
-      // bool en = usb_out || usb_in;
-      // if (prev_en != en) {
-      //   kanplay_ns::system_registry.runtime_info.setMidiPortStateUSB(en ? kanplay_ns::def::command::midiport_info_t::mp_enabled : kanplay_ns::def::command::midiport_info_t::mp_off);
-      // }
+    if (prev_usb_mode != usb_mode || prev_usb_out != usb_out || prev_usb_in != usb_in) {
+      if (!usb_midi_transport.setUSBMode(usb_mode)) {
+        // 設定が変更できなかった場合
+        system_registry.popup_notify.setMessage(def::notify_type_t::MESSAGE_NEED_RESTART);
+        usb_mode = usb_midi_transport.getUSBMode();
+      }
+      if (usb_in || usb_out) {
+        usb_midi_subtask.start();
+      }
+      prev_usb_mode = usb_mode;
       prev_usb_out = usb_out;
       prev_usb_in  = usb_in;
       usb_midi_transport.setUseTxRx(usb_out, usb_in);
     }
 #endif
 
-    for (int i = 0; i < max_subtask; ++i) {
-      xTaskNotifyGive(subtask_handle[i]);
+    for (auto &subtask : subtask_array) {
+      subtask->execNotify();
     }
   }
 #endif

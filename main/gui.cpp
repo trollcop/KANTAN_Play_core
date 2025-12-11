@@ -432,44 +432,32 @@ struct ui_popup_notify_t : public ui_timer_popup_t
 {
 protected:
   std::string _text;
+  uint32_t _text_color;
   registry_t::history_code_t _history_code;
   def::notify_type_t _notify_type;
-  bool _is_success;
+  system_registry_t::reg_popup_notify_t::category_t _category;
 public:
   void update_impl(draw_param_t *param, int offset_x, int offset_y) override {
     bool updated = false;
-    if (system_registry.popup_notify.getPopupHistory(_history_code, _notify_type, _is_success))
+    if (system_registry.popup_notify.getPopupHistory(_history_code, _notify_type, _category))
     {
-      const char* t = "";
-      switch (_notify_type) {
-      default: break;
-      case def::notify_type_t::NOTIFY_STORAGE_OPEN:
-        t = "Storage Open : "; break;
-      case def::notify_type_t::NOTIFY_FILE_LOAD:
-        t = "File Load : "; break;
-      case def::notify_type_t::NOTIFY_FILE_SAVE:
-        t = "File Save : "; break;
-      case def::notify_type_t::NOTIFY_COPY_SLOT_SETTING:
-        t = "Copy Slot : "; break;
-      case def::notify_type_t::NOTIFY_PASTE_SLOT_SETTING:
-        t = "Paste Slot : "; break;
-      case def::notify_type_t::NOTIFY_COPY_PART_SETTING:
-        t = "Copy Part : "; break;
-      case def::notify_type_t::NOTIFY_PASTE_PART_SETTING:
-        t = "Paste Part : "; break;
-      case def::notify_type_t::NOTIFY_CLEAR_ALL_NOTES:
-        t = "Clear all notes : "; break;
-      case def::notify_type_t::NOTIFY_ALL_RESET:
-        t = "All Reset : "; break;
-      case def::notify_type_t::NOTIFY_DEVELOPER_MODE:
-        t = "Developer : "; break;
-      }
+      auto text = def::notify_name_array.at(_notify_type);
+      const char* t = text->get();
+
+      _text_color = 0xFFFF00u;
       if (t) {
         _text = t;
-        if (_is_success) {
-          _text += "OK";
-        } else {
-          _text += "Error";
+        switch (_category) {
+        case system_registry_t::reg_popup_notify_t::category_t::SUCCESS_NOTIFY:
+          _text += " : OK";
+          _text_color = 0x20FF20u;
+          break;
+        case system_registry_t::reg_popup_notify_t::category_t::ERROR_NOTIFY:
+          _text += " : Error";
+          _text_color = 0xFF8080u;
+          break;
+        default:
+          break;
         }
         _gfx->setTextSize(1, 2);
         int w = _gfx->textWidth(_text.c_str()) + 16;
@@ -495,7 +483,7 @@ public:
     canvas->drawRect(offset_x+2, offset_y+2, _client_rect.w-4, _client_rect.h-4, 0xFFFFFFu);
 
     canvas->setTextDatum(m5gfx::datum_t::middle_center);
-    canvas->setTextColor(_is_success ? 0x20FF20u : 0xFF8080u);
+    canvas->setTextColor(_text_color);
     canvas->setTextSize(1, 2);
     canvas->drawString(_text.c_str(), x, y);
   }
@@ -769,10 +757,10 @@ public:
 
     int xc = x + (w >> 1);
     int yc = y + (h >> 1) - 2;
-    canvas->fillCircle(xc, yc, 2, level > 0 ? TFT_WHITE : TFT_DARKGREY);
-    canvas->fillRoundRect(xc - 2, yc + 4, 5, 8, 2, level > 0 ? TFT_WHITE : TFT_DARKGREY);
-    canvas->fillArc(xc, yc,  5,  6, 150, 390, level > 1 ? TFT_WHITE : TFT_DARKGREY);
-    canvas->fillArc(xc, yc,  9, 10, 130, 410, level > 2 ? TFT_WHITE : TFT_DARKGREY);
+    canvas->fillCircle(xc, yc, 2, level > 0 ? 0xFFFFFFu : 0x3F3F3Fu);
+    canvas->fillRoundRect(xc - 2, yc + 4, 5, 8, 2, level > 0 ? 0xFFFFFFu : 0x3F3F3Fu);
+    canvas->fillArc(xc, yc,  5,  6, 150, 390, level > 1 ? 0xFFFFFFu : 0x3F3F3Fu);
+    canvas->fillArc(xc, yc,  9, 10, 130, 410, level > 2 ? 0xFFFFFFu : 0x3F3F3Fu);
     if (level < 0) {
       canvas->drawLine(offset_x, offset_y, offset_x+w, offset_y+h, TFT_RED);
       canvas->drawLine(offset_x, offset_y+h, offset_x+w, offset_y, TFT_RED);
@@ -958,6 +946,13 @@ public:
     switch (_autoplay_style) {
     default:
       canvas->fillTriangle(x - 5, y - 5, x - 5, y + 5, x + 5, y, TFT_GREEN);
+      break;
+    case def::play::auto_play_mode_t::auto_play_waiting:
+      canvas->fillRect(x - 5, y - 5, 11, 11, TFT_DARKGRAY);
+      break;
+    case def::play::auto_play_mode_t::auto_play_paused:
+      canvas->fillRect(x - 5, y - 5,  3, 11, TFT_DARKGRAY);
+      canvas->fillRect(x + 5, y - 5, -3, 11, TFT_DARKGRAY);
       break;
     case def::play::auto_play_mode_t::auto_play_none:
       break;
@@ -1239,16 +1234,15 @@ struct ui_main_buttons_t : public ui_base_t
           }
         }
 
-        if (pindex != 0) {
-          for (auto data: def::command::button_text_table) {
-            if (data.command == cp_pair) {
-              name = data.text;
-              _text_lower[i] = data.lower;
-              _text_upper[i] = data.upper;
-              break;
-            }
+        for (auto data: def::command::button_text_table) {
+          if (data.command == cp_pair) {
+            name = data.text;
+            _text_lower[i] = data.lower;
+            _text_upper[i] = data.upper;
+            break;
           }
-        } else {
+        }
+        if (pindex == 0) {
           switch (command) {
           default:
             break;
@@ -1311,7 +1305,6 @@ struct ui_main_buttons_t : public ui_base_t
               options.minor_swap = _minor_swap;
               options.semitone_shift = _semitone;
 
-              // auto pc = param->play_control;
               uint8_t note = KANTANMusic_GetMidiNoteNumber
                 ( 1
                 , command_param.param
@@ -2228,7 +2221,7 @@ public:
     }
 
     if (system_registry.chord_play.getConfirm_Paste())
-    { // クリップボードのパターンを描画
+    { // コピー/ペースト(クリップボード)のパターンを描画
       auto part = &system_registry.current_slot->chord_part[_part_index];
       auto part_info = &part->part_info;
 
@@ -3164,8 +3157,20 @@ void gui_t::init(void)
   _gfx->setColorDepth(color_depth);
   _gfx->setFont(&fonts::efontJA_16_b);
 
+#if !defined (M5UNIFIED_PC_BUILD)
+  // メモリブロックの断片化への対策として、小さい断片化領域から使用するため、敢えて最大領域を先回りして確保する。
+  auto dummy = m5gfx::heap_alloc_dma(heap_caps_get_largest_free_block(MALLOC_CAP_DMA));
+  // 上記の処理により、以下のメモリ確保は二番目に小さい領域から確保されることになる。
   for (int i = 0; i < disp_buf_count; ++i) {
     _draw_buffer[i] = (uint16_t*)m5gfx::heap_alloc_dma(max_disp_buf_pixels * color_depth >> 3);
+  }
+  // 先回りして確保しておいた領域を解放する。
+  m5gfx::heap_free(dummy);
+#endif
+  for (int i = 0; i < disp_buf_count; ++i) {
+    if (_draw_buffer[i] == nullptr) {
+      _draw_buffer[i] = (uint16_t*)m5gfx::heap_alloc_dma(max_disp_buf_pixels * color_depth >> 3);
+    }
   }
 
   // disp_width  = _gfx->width();

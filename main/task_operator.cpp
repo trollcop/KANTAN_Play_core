@@ -10,6 +10,10 @@
 #include "file_manage.hpp"
 #include "menu_data.hpp"
 
+#if !defined (M5UNIFIED_PC_BUILD)
+#include <nvs_flash.h>
+#endif
+
 namespace kanplay_ns {
 //-------------------------------------------------------------------------
 
@@ -195,68 +199,73 @@ void task_operator_t::task_func(task_operator_t* me)
     if (working_command_change_counter != tmp)
     {
       working_command_change_counter = tmp;
+  
+      me->syncButtonColor();
+    }
+  }
+}
 
-      { // メインボタンの色設定
-        for (int i = 0; i < def::hw::max_main_button; ++i) {
-          auto pair = system_registry.command_mapping_current.getCommandParamArray(i);
-          uint32_t color = 0;
-          bool hit = true;
-          for (int j = 0; pair.array[j].command != def::command::none; ++j) {
-            auto command_param = pair.array[j];
-            color = getColorByCommand(command_param);
-            hit &= system_registry.working_command.check(command_param);
-          }
-
-          if (!hit) {
-            int r = (color >> 16) & 0xFF;
-            int g = (color >> 8) & 0xFF;
-            int b = color & 0xFF;
-            r = (r * 3) >> 3;
-            g = (g * 3) >> 3;
-            b = (b * 3) >> 3;
-            color = (r << 16) | (g << 8) | b;
-          }
-          system_registry.rgbled_control.setColor(i, color);
-        }
+void task_operator_t::syncButtonColor(void)
+{
+  { // メインボタンの色設定
+    for (int i = 0; i < def::hw::max_main_button; ++i) {
+      auto pair = system_registry.command_mapping_current.getCommandParamArray(i);
+      uint32_t color = 0;
+      bool hit = true;
+      for (int j = 0; pair.array[j].command != def::command::none; ++j) {
+        auto command_param = pair.array[j];
+        color = getColorByCommand(command_param);
+        hit &= system_registry.working_command.check(command_param);
       }
 
-      { // サブボタンの色設定
-        bool is_swap = isSubButtonSlotSwap();
-        for (int i = 0; i < def::hw::max_sub_button*2; ++i) {
-          auto pair = system_registry.sub_button.getCommandParamArray(i);
-          auto command_param = pair.array[0];
-          auto color = getColorByCommand(command_param);
-          bool isWorking = system_registry.working_command.check(command_param);
+      if (!hit) {
+        int r = (color >> 16) & 0xFF;
+        int g = (color >> 8) & 0xFF;
+        int b = color & 0xFF;
+        r = (r * 3) >> 3;
+        g = (g * 3) >> 3;
+        b = (b * 3) >> 3;
+        color = (r << 16) | (g << 8) | b;
+      }
+      system_registry.rgbled_control.setColor(i, color);
+    }
+  }
 
-          if (!isWorking) {
-            int r = (color >> 16) & 0xFF;
-            int g = (color >> 8) & 0xFF;
-            int b = color & 0xFF;
-            if (is_swap == (i < def::hw::max_sub_button)) {
-              // RGB色を合成してグレー化する
-              // gamma2.0 convert and ITU-R BT.601 RGB to Y convert
-              uint32_t y = ( (r * r * 19749)    // R 0.299
-                          + (g * g * 38771)    // G 0.587
-                          + (b * b *  7530)    // B 0.114
-                          ) >> 24;
-              y = (y * 3) >> 3;
-              color = y | (y << 8) | (y << 16);
-            } else {
-              int k = 7;
-              r = (r * k) >> 4;
-              g = (g * k) >> 4;
-              b = (b * k) >> 4;
-              color = (r << 16) | (g << 8) | b;
-            }
-          }
-          if (is_swap == (i >= def::hw::max_sub_button)) {
-            int sub_button_index = i % def::hw::max_sub_button;
-            system_registry.rgbled_control.setColor(sub_button_index + def::hw::max_main_button, color);
-  // M5_LOGE("sub_button_index:%d color:%08x", sub_button_index, color);
-          }
-          system_registry.sub_button.setSubButtonColor(i, color);
+  { // サブボタンの色設定
+    bool is_swap = isSubButtonSlotSwap();
+    for (int i = 0; i < def::hw::max_sub_button*2; ++i) {
+      auto pair = system_registry.sub_button.getCommandParamArray(i);
+      auto command_param = pair.array[0];
+      auto color = getColorByCommand(command_param);
+      bool isWorking = system_registry.working_command.check(command_param);
+
+      if (!isWorking) {
+        int r = (color >> 16) & 0xFF;
+        int g = (color >> 8) & 0xFF;
+        int b = color & 0xFF;
+        if (is_swap == (i < def::hw::max_sub_button)) {
+          // RGB色を合成してグレー化する
+          // gamma2.0 convert and ITU-R BT.601 RGB to Y convert
+          uint32_t y = ( (r * r * 19749)    // R 0.299
+                      + (g * g * 38771)    // G 0.587
+                      + (b * b *  7530)    // B 0.114
+                      ) >> 24;
+          y = (y * 3) >> 3;
+          color = y | (y << 8) | (y << 16);
+        } else {
+          int k = 7;
+          r = (r * k) >> 4;
+          g = (g * k) >> 4;
+          b = (b * k) >> 4;
+          color = (r << 16) | (g << 8) | b;
         }
       }
+      if (is_swap == (i >= def::hw::max_sub_button)) {
+        int sub_button_index = i % def::hw::max_sub_button;
+        system_registry.rgbled_control.setColor(sub_button_index + def::hw::max_main_button, color);
+// M5_LOGE("sub_button_index:%d color:%08x", sub_button_index, color);
+      }
+      system_registry.sub_button.setSubButtonColor(i, color);
     }
   }
 }
@@ -344,7 +353,7 @@ void task_operator_t::commandProccessor(const def::command::command_param_t& com
   case def::command::drum_button:
   case def::command::chord_step_reset_request:
   case def::command::autoplay_switch:
-  case def::command::panic_stop:
+  case def::command::play_control:
     system_registry.player_command.addQueue(command_param, is_pressed);
     break;
 
@@ -361,11 +370,11 @@ void task_operator_t::commandProccessor(const def::command::command_param_t& com
     break;
 
   case def::command::chord_bass_degree:
-    procChordBaseDegree(command_param, is_pressed);
+    procChordBassDegree(command_param, is_pressed);
     break;
 
   case def::command::chord_bass_semitone:
-    procChordBaseSemitone(command_param, is_pressed);
+    procChordBassSemitone(command_param, is_pressed);
     break;
 
   // case def::command::swap_sub_button:
@@ -390,7 +399,11 @@ void task_operator_t::commandProccessor(const def::command::command_param_t& com
       // パターン編集モードの場合、スロット切替を許可しない
       if (system_registry.runtime_info.getPlayMode() != def::playmode::playmode_t::chord_edit_mode) {
         auto slot_index = (int)system_registry.runtime_info.getPlaySlot();
-        slot_index += param;  // paramは-1,1のいずれか
+        switch (param) {
+        case def::command::slot_select_ud_t::slot_next:  slot_index += 1; break;
+        case def::command::slot_select_ud_t::slot_prev:  slot_index -= 1; break;
+        default: break;
+        }
         // スロット番号を範囲内に収まるようループさせる
         while (slot_index < 0) {
           slot_index += def::app::max_slot;
@@ -503,7 +516,7 @@ void task_operator_t::commandProccessor(const def::command::command_param_t& com
     }
     break;
 
-  case def::command::load_from_memory:
+  case def::command::file_load_notify:
     if (is_pressed) {
 
       // file_managerがファイルをメモリ上に展開し終えた後にload_memoryコマンドが実行される
@@ -530,10 +543,6 @@ void task_operator_t::commandProccessor(const def::command::command_param_t& com
             system_registry.operator_command.addQueue( { def::command::slot_select, 1 } );
             system_registry.player_command.addQueue( { def::command::chord_step_reset_request, 1 } );
           }
-          break;
-
-        case def::app::data_type_t::data_setting:
-          system_registry.loadSettingJSON(mem->data, mem->size);
           break;
         }
         system_registry.checkSongModified();
@@ -586,12 +595,63 @@ void task_operator_t::commandProccessor(const def::command::command_param_t& com
     }
     break;
 
-  case def::command::power_control:
+  case def::command::system_control:
     if (is_pressed) {
-      system_registry.save();
-      M5.delay(128);
-      system_registry.runtime_info.setPowerOff(param ? 2 : 1);
-      M5.delay(256);
+      switch (param) {
+      default: break;
+      case def::command::system_control_t::sc_power_off:
+        system_registry.save();
+        system_registry.runtime_info.setPowerOff(def::command::system_control_t::sc_power_off);
+        break;
+
+      case def::command::system_control_t::sc_reset:
+        system_registry.save();
+        system_registry.runtime_info.setPowerOff(def::command::system_control_t::sc_reset);
+        break;
+
+      case def::command::system_control_t::sc_save_settings:
+        system_registry.saveSetting();
+        break;
+
+      case def::command::system_control_t::sc_save_resume:
+        system_registry.saveResume();
+        break;
+
+      case def::command::system_control_t::sc_boot:
+        {
+          // 最後に扱ったソングデータのファイル名とデータタイプを取得
+          auto filename = file_manage.getLatestFileName();
+          auto datatype = file_manage.getLatestDataType();
+          M5_LOGV("file:%s  type:%d", filename.c_str(), (uint8_t)datatype);
+
+          system_registry.file_command.setUpdateList(datatype);
+          auto dm = file_manage.getDirManage(datatype);
+          if (dm != nullptr) {
+            // 前回使用していたファイルを特定する (ファイル名からindex特定)
+            for (int retry = 16; dm->isEmpty() && retry; --retry) {
+              M5.delay(16);
+            }
+            auto index = dm->search(filename.c_str());
+            if (index >= 0) {
+              def::app::file_command_info_t songinfo;
+              songinfo.file_index = index;
+              songinfo.dir_type = datatype;
+              system_registry.file_command.setCurrentSongInfo(songinfo);
+            }
+          }
+          system_registry.syncParams();
+
+          // 演奏の強制停止処理を入れておく
+          system_registry.player_command.addQueue( { def::command::play_control, def::command::play_control_t::pc_panic_stop } );
+        }
+        break;
+
+      case def::command::system_control_t::sc_erase_nvs:
+#if !defined (M5UNIFIED_PC_BUILD)
+        nvs_flash_erase();
+#endif
+        break;
+      }
     }
     break;
 
@@ -724,10 +784,12 @@ void task_operator_t::commandProccessor(const def::command::command_param_t& com
       default:
       case def::command::edit_exit_t::save:
         { // 確定操作は特になにもしなくてよい。
-          // system_registry.backup_song_data.assign(system_registry.song_data);
         }
         break;
       }
+      // 編集の終了時にレジューム情報も更新しておく
+      system_registry.operator_command.addQueue( { def::command::system_control, def::command::sc_save_resume } );
+
       // コード演奏モードに戻す
       system_registry.operator_command.addQueue( { def::command::play_mode_set, def::playmode::playmode_t::chord_mode } );
       // 演奏ステップを先頭に戻す
@@ -785,12 +847,16 @@ void task_operator_t::commandProccessor(const def::command::command_param_t& com
 
 // 最上位メニューから抜けた時の処理
 void task_operator_t::afterMenuClose(void)
-{ // メニューから抜ける時はオートプレイは無効にする
-  system_registry.runtime_info.setChordAutoplayState(def::play::auto_play_mode_t::auto_play_none);
-
+{
   system_registry.runtime_info.setMenuVisible( false );
   changeCommandMapping();
-  system_registry.save();
+
+ // メニューから抜ける時はオートプレイは無効にする
+  system_registry.runtime_info.setChordAutoplayState(def::play::auto_play_mode_t::auto_play_none);
+
+  // 設定を保存しておく
+  system_registry.operator_command.addQueue( { def::command::system_control, def::command::sc_save_settings } );
+  system_registry.operator_command.addQueue( { def::command::system_control, def::command::sc_save_resume } );
 }
 
 void task_operator_t::procEditFunction(const def::command::command_param_t& command_param)
@@ -1014,7 +1080,7 @@ void task_operator_t::procChordSemitone(const def::command::command_param_t& com
   // system_registry.player_command.addQueue( { def::command::chord_step_reset_request, 1 } );
 }
 
-void task_operator_t::procChordBaseDegree(const def::command::command_param_t& command_param, const bool is_pressed)
+void task_operator_t::procChordBassDegree(const def::command::command_param_t& command_param, const bool is_pressed)
 {
   // M5_LOGV("chord_bass_degree %d %d", command_param.getParam(), is_pressed);
   // TODO: 暫定実装。
@@ -1036,7 +1102,7 @@ void task_operator_t::procChordBaseDegree(const def::command::command_param_t& c
   system_registry.chord_play.setChordBassDegree(base_degree);
 }
 
-void task_operator_t::procChordBaseSemitone(const def::command::command_param_t& command_param, const bool is_pressed)
+void task_operator_t::procChordBassSemitone(const def::command::command_param_t& command_param, const bool is_pressed)
 {
   // M5_LOGV("chord_bass_semitone %d %d", command_param.getParam(), is_pressed);
   int value = 0;
@@ -1139,10 +1205,6 @@ void task_operator_t::changeCommandMapping(void)
   for (int i = 0; i < def::hw::max_button_mask; ++i) {
     auto pair = main_map[i];
     system_registry.command_mapping_current.setCommandParamArray(i, pair);
-    if (i < def::hw::max_main_button) {
-      auto color = getColorByCommand(pair.array[0]);
-      system_registry.button_basecolor.setColor(i, color);
-    }
   }
   if (custom_map) {
     for (int i = 0; i < def::hw::max_main_button; ++i) {
@@ -1155,6 +1217,8 @@ void task_operator_t::changeCommandMapping(void)
   for (int i = 0; i < def::hw::max_sub_button*2; ++i) {
     system_registry.sub_button.setCommandParamArray(i, sub_map[i]);
   }
+
+  syncButtonColor();
 }
 
 //-------------------------------------------------------------------------
